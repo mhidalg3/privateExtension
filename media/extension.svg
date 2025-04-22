@@ -1,0 +1,6 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <rect width="256" height="256" fill="transparent"/>
+  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle"
+        font-family="Monaco, 'Courier New', monospace" font-size="90" font-weight="bold"
+        fill="#ff6600">&lt;...&gt;</text>
+</svg>
