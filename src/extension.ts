@@ -1,31 +1,51 @@
+/// <reference types="vscode" />
+
 import * as vscode from 'vscode';
 import fetch from 'node-fetch';
 
 export function activate(context: vscode.ExtensionContext) {
-    const provider = new InlyneSidebarProvider(context.extensionUri);
     context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider(InlyneSidebarProvider.viewType, provider)
+        vscode.commands.registerCommand('inlyne.openPanel', () => {
+            InlynePanel.createOrShow();
+        })
     );
 }
 
-class InlyneSidebarProvider implements vscode.WebviewViewProvider {
-    public static readonly viewType = 'inlyne.sidebarView';
-    private _view?: vscode.WebviewView;
-    private readonly API_BASE_URL = 'http://localhost:8080'; 
+class InlynePanel {
+    public static currentPanel: InlynePanel | undefined;
+    private readonly _panel: vscode.WebviewPanel;
+    private _disposables: vscode.Disposable[] = [];
 
-    constructor(private readonly _extensionUri: vscode.Uri) {}
+    private readonly API_BASE_URL = 'http://localhost:8080';
 
-    resolveWebviewView(webviewView: vscode.WebviewView) {
-        this._view = webviewView;
+    public static createOrShow() {
+        const column = vscode.ViewColumn.One;
 
-        webviewView.webview.options = {
-            enableScripts: true,
-        };
+        if (InlynePanel.currentPanel) {
+            InlynePanel.currentPanel._panel.reveal(column);
+        } else {
+            const panel = vscode.window.createWebviewPanel(
+                'inlynePanel',
+                'Inlyne Tab',
+                column,
+                {
+                    enableScripts: true,
+                    retainContextWhenHidden: true // critical for tabs
+                }
+            );
 
-        webviewView.webview.html = this.getWebviewContent();
+            InlynePanel.currentPanel = new InlynePanel(panel);
+        }
+    }
 
-        // Listen for messages from the Webview
-        webviewView.webview.onDidReceiveMessage(async (message) => {
+    private constructor(panel: vscode.WebviewPanel) {
+        this._panel = panel;
+
+        this._panel.webview.html = this.getWebviewContent();
+
+        // Listen for messages from the webview
+        this._panel.webview.onDidReceiveMessage(async (message) => {
+            console.log('🔥 Received message from webview:', message); // log for debugging
             switch (message.type) {
                 case 'createDoc':
                     await this.createDocument();
@@ -37,27 +57,20 @@ class InlyneSidebarProvider implements vscode.WebviewViewProvider {
                     break;
             }
         });
+
+        this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     }
 
-    private async createDocument() {
-        try {
-            const response = await fetch(`${this.API_BASE_URL}/docs`, { method: 'POST' });
-            const data = await response.json();
-            this._view?.webview.postMessage({ type: 'docCreated', data: data });
-        } catch (error) {
-            console.error('Error creating document:', error);
-            this._view?.webview.postMessage({ type: 'backendError' });
-        }
-    }
+    public dispose() {
+        InlynePanel.currentPanel = undefined;
 
-    private async fetchDocument(key: string) {
-        try {
-            const response = await fetch(`${this.API_BASE_URL}/docs/${key}`);
-            const data = await response.json();
-            this._view?.webview.postMessage({ type: 'docFetched', data: data });
-        } catch (error) {
-            console.error('Error fetching document:', error);
-            this._view?.webview.postMessage({ type: 'backendError' });
+        this._panel.dispose();
+
+        while (this._disposables.length) {
+            const x = this._disposables.pop();
+            if (x) {
+                x.dispose();
+            }
         }
     }
 
@@ -67,7 +80,7 @@ class InlyneSidebarProvider implements vscode.WebviewViewProvider {
         <html lang="en">
         <head>
             <meta charset="UTF-8">
-            <title>Inlyne Sidebar</title>
+            <title>Inlyne Tab</title>
             <style>
                 body { font-family: sans-serif; padding: 1rem; }
                 textarea { width: 100%; height: 300px; margin-top: 1rem; }
@@ -100,17 +113,37 @@ class InlyneSidebarProvider implements vscode.WebviewViewProvider {
                 const urlDiv = document.getElementById('url');
                 const editor = document.getElementById('editor');
 
+                // Create new document
                 createBtn.addEventListener('click', () => {
                     vscode.postMessage({ type: 'createDoc' });
+                    console.log('✅ Sent createDoc to extension');
                 });
 
+                // Load existing document
                 loadBtn.addEventListener('click', () => {
-                    const key = docKeyInput.value.trim();
+                    let key = docKeyInput.value.trim();
+                    if (!key) return;
+
+                    // --- START: Extract docKey ---
+                    // If full URL with ?docKey=...
+                    if (key.includes('?docKey=')) {
+                        const urlParams = new URLSearchParams(key.split('?')[1]);
+                        key = urlParams.get('docKey');
+                    } else if (key.startsWith('http')) {
+                        // If full URL like /docs/abc123
+                        key = key.split('/').pop();
+                    }
+                    // --- END: Extract docKey ---
+
                     if (key) {
                         vscode.postMessage({ type: 'fetchDoc', key: key });
+                        console.log('✅ Sent fetchDoc to extension with key:', key);
+                    } else {
+                        console.error('❌ Could not extract docKey');
                     }
                 });
 
+                // Listen to editor changes and publish to websocket
                 editor.addEventListener('input', () => {
                     if (stompClient?.active && docKey) {
                         stompClient.publish({
@@ -120,8 +153,11 @@ class InlyneSidebarProvider implements vscode.WebviewViewProvider {
                     }
                 });
 
+                // Listen for messages from the extension
                 window.addEventListener('message', event => {
                     const message = event.data;
+                    console.log('✅ Received message from extension:', message);
+
                     switch (message.type) {
                         case 'docCreated':
                             handleDocCreated(message.data);
@@ -136,15 +172,22 @@ class InlyneSidebarProvider implements vscode.WebviewViewProvider {
                 });
 
                 function handleDocCreated(data) {
-                    const url = data.url;
-                    docKey = url.split('/').pop();
+                    console.log('handleDocCreated received:', data);
+                    const url = data?.url;
+                    if (!url) {
+                        console.error('❌ No URL in data or data is undefined:', data);
+                        return;
+                    }
+                    const key = url.split('/').pop();
+                    docKey = key;
                     editor.disabled = false;
                     editor.value = '';
-                    urlDiv.textContent = 'Document URL: ?docKey=' + docKey;
-                    connectWebSocket(docKey);
+                    urlDiv.textContent = \`Document URL: ?docKey=\${key}\`;
+                    connectWebSocket(key);
                 }
 
                 function handleDocFetched(doc) {
+                    console.log('handleDocFetched received:', doc);
                     docKey = doc.linkKey;
                     editor.disabled = false;
                     editor.value = doc.content || '';
@@ -186,5 +229,40 @@ class InlyneSidebarProvider implements vscode.WebviewViewProvider {
         </body>
         </html>
         `;
+    }
+
+    // ---- Backend functions ----
+
+    private async createDocument() {
+        console.log('✅ createDocument called');
+        try {
+            const response = await fetch(`${this.API_BASE_URL}/docs`, { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'create' })  // match index.html
+            });
+            const data = await response.json();
+            console.log('✅ Document created response FULL:', JSON.stringify(data));
+
+            // Post data back to webview
+            this._panel.webview.postMessage({ type: 'docCreated', data: data });
+            console.log('✅ Document created and sent to webview');
+        } catch (error) {
+            console.error('❌ Error creating document:', error);
+            this._panel.webview.postMessage({ type: 'backendError' });
+        }
+    }
+
+    private async fetchDocument(key: string) {
+        console.log('✅ fetchDocument called with key:', key);
+        try {
+            const response = await fetch(`${this.API_BASE_URL}/docs?requestType=getDoc&key=${key}`);
+            const data = await response.json();
+            this._panel.webview.postMessage({ type: 'docFetched', data: data });
+            console.log('✅ Document fetched and sent to webview');
+        } catch (error) {
+            console.error('❌ Error fetching document:', error);
+            this._panel.webview.postMessage({ type: 'backendError' });
+        }
     }
 }

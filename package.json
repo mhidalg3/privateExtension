@@ -10,35 +10,16 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:inlyne.helloWorld",
-    "onView:inlyne.sidebarView"
+    "onCommand:inlyne.openPanel"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "inlyne.helloWorld",
-        "title": "Hello World"
+        "command": "inlyne.openPanel",
+        "title": "Open Inlyne Tab"
       }
-    ],
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "inlyne-sidebar",
-          "title": "Inlyne",
-          "icon": "media/extension.svg"
-        }
-      ]
-    },
-    "views": {
-      "inlyne-sidebar": [
-        {
-          "id": "inlyne.sidebarView",
-          "name": "Documentation",
-          "type": "webview"
-        }
-      ]
-    }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -52,7 +33,6 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
     "@types/node-fetch": "^2.6.12",
-    "@types/vscode": "^1.99.1",
     "@typescript-eslint/eslint-plugin": "^8.28.0",
     "@typescript-eslint/parser": "^8.28.0",
     "@vscode/test-cli": "^0.0.10",
