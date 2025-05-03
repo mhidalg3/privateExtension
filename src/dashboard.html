@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard</title>
+</head>
+<body>
+    <h2>Your Documents</h2>
+    <div id="docList">Loading...</div>
+
+    <script>
+        const vscode = acquireVsCodeApi();
+        vscode.postMessage({ type: 'openDashboard' });
+
+        window.addEventListener('message', event => {
+            const msg = event.data;
+            if (msg.type === 'docList') {
+                const container = document.getElementById('docList');
+                container.innerHTML = '';
+                msg.docs.forEach(doc => {
+                    const btn = document.createElement('button');
+                    btn.textContent = doc.name || doc.linkKey;
+                    btn.onclick = () => {
+                        vscode.postMessage({ type: 'openDoc', key: doc.linkKey });
+                    };
+                    container.appendChild(btn);
+                    container.appendChild(document.createElement('br'));
+                });
+            }
+        });
+    </script>
+</body>
+</html>

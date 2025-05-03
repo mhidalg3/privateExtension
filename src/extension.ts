@@ -4,265 +4,308 @@ import * as vscode from 'vscode';
 import fetch from 'node-fetch';
 
 export function activate(context: vscode.ExtensionContext) {
-    context.subscriptions.push(
-        vscode.commands.registerCommand('inlyne.openPanel', () => {
-            InlynePanel.createOrShow();
-        })
-    );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('inlyne.openPanel', () => {
+      InlynePanel.createOrShow(context);
+    })
+  );
 }
 
 class InlynePanel {
-    public static currentPanel: InlynePanel | undefined;
-    private readonly _panel: vscode.WebviewPanel;
-    private _disposables: vscode.Disposable[] = [];
+  private static currentPanel: InlynePanel | undefined;
+  private readonly panel: vscode.WebviewPanel;
+  private readonly context: vscode.ExtensionContext;
+  private readonly API_BASE_URL = 'http://localhost:8080';
+  private disposables: vscode.Disposable[] = [];
 
-    private readonly API_BASE_URL = 'http://localhost:8080';
+  private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext) {
+    this.panel = panel;
+    this.context = context;
+    this.updateWebview();
+    this.panel.webview.onDidReceiveMessage(this.onMessage.bind(this));
+    this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+  }
 
-    public static createOrShow() {
-        const column = vscode.ViewColumn.One;
+  public static createOrShow(context: vscode.ExtensionContext) {
+    const column = vscode.ViewColumn.One;
 
-        if (InlynePanel.currentPanel) {
-            InlynePanel.currentPanel._panel.reveal(column);
-        } else {
-            const panel = vscode.window.createWebviewPanel(
-                'inlynePanel',
-                'Inlyne Tab',
-                column,
-                {
-                    enableScripts: true,
-                    retainContextWhenHidden: true // critical for tabs
-                }
-            );
+    if (InlynePanel.currentPanel) {
+      InlynePanel.currentPanel.panel.reveal(column);
+    } else {
+      const panel = vscode.window.createWebviewPanel(
+        'inlynePanel',
+        'Inlyne',
+        column,
+        { enableScripts: true, retainContextWhenHidden: true }
+      );
+      InlynePanel.currentPanel = new InlynePanel(panel, context);
+    }
+  }
 
-            InlynePanel.currentPanel = new InlynePanel(panel);
+  private dispose() {
+    InlynePanel.currentPanel = undefined;
+    this.panel.dispose();
+    this.disposables.forEach(d => d.dispose());
+  }
+
+  private async onMessage(message: any) {
+    switch (message.type) {
+      case 'signup':
+        await this.handleSignup(message.username, message.email, message.password);
+        break;
+      case 'login':
+        await this.handleLogin(message.email, message.password);
+        break;
+      case 'logout':
+        this.handleLogout();
+        break;
+      case 'createDoc':
+        await this.createDocument();
+        break;
+      case 'fetchDoc':
+        if (message.key) {
+          await this.fetchDocument(message.key);
         }
+        break;
+    }
+  }
+
+  // --- Handlers ------------------------------------------------
+
+  private async handleSignup(username: string, email: string, password: string) {
+    try {
+      const res = await fetch(`${this.API_BASE_URL}/user`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'userSignup', username, email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.details || data.message || 'Signup failed');
+
+      vscode.window.showInformationMessage('Signup successful! Please log in.');
+      this.panel.webview.postMessage({ type: 'signupSuccess' });
+    } catch (err: any) {
+      vscode.window.showErrorMessage('Signup failed: ' + err.message);
+      this.panel.webview.postMessage({ type: 'backendError' });
+    }
+  }
+
+  private async handleLogin(email: string, password: string) {
+    try {
+      const res = await fetch(`${this.API_BASE_URL}/user`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'userLogin', email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.details || data.message || 'Login failed');
+
+      await this.context.globalState.update('inlyneToken', data.token);
+      await this.context.globalState.update('inlyneUser', data.email);
+      this.updateWebview();
+      vscode.window.showInformationMessage(`Logged in as ${data.email}`);
+    } catch (err: any) {
+      vscode.window.showErrorMessage('Login failed: ' + err.message);
+      this.panel.webview.postMessage({ type: 'backendError' });
+    }
+  }
+
+  private handleLogout() {
+    this.context.globalState.update('inlyneToken', undefined);
+    this.context.globalState.update('inlyneUser', undefined);
+    this.updateWebview();
+  }
+
+  // --- Doc APIs ------------------------------------------------
+
+  private async createDocument() {
+    const token = this.context.globalState.get<string>('inlyneToken');
+    if (!token) {
+      vscode.window.showErrorMessage('Please log in first.');
+      return;
+    }
+    try {
+      const res = await fetch(`${this.API_BASE_URL}/docs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ type: 'create' })
+      });
+      const data = await res.json();
+      this.panel.webview.postMessage({ type: 'docCreated', data });
+    } catch (err) {
+      console.error(err);
+      this.panel.webview.postMessage({ type: 'backendError' });
+    }
+  }
+
+  private async fetchDocument(key: string) {
+    try {
+      const res = await fetch(
+        `${this.API_BASE_URL}/docs?requestType=getDoc&key=${key}`
+      );
+      const data = await res.json();
+      this.panel.webview.postMessage({ type: 'docFetched', data });
+    } catch (err) {
+      console.error(err);
+      this.panel.webview.postMessage({ type: 'backendError' });
+    }
+  }
+
+  // --- Render --------------------------------------------------
+
+  private updateWebview() {
+    this.panel.webview.html = this.getWebviewContent();
+  }
+
+  private getWebviewContent(): string {
+    const email = this.context.globalState.get<string>('inlyneUser');
+    // Not logged in: show signup/login
+    if (!email) {
+      return `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head><meta charset="UTF-8"><title>Inlyne Auth</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 2rem; }
+          .form-section { border: 1px solid #ccc; padding: 1rem; margin-bottom: 2rem; }
+          input { display: block; margin: .5rem 0; padding: .5rem; width: 100%; }
+          button { padding: .5rem 1rem; }
+        </style>
+      </head>
+      <body>
+
+        <div class="form-section">
+          <h2>Signup</h2>
+          <input type="text" id="signupUsername" placeholder="Username">
+          <input type="email" id="signupEmail" placeholder="Email">
+          <input type="password" id="signupPassword" placeholder="Password">
+          <button onclick="signup()">Signup</button>
+        </div>
+
+        <div class="form-section">
+          <h2>Login</h2>
+          <input type="email" id="loginEmail" placeholder="Email">
+          <input type="password" id="loginPassword" placeholder="Password">
+          <button onclick="login()">Login</button>
+        </div>
+
+        <script>
+          const vscode = acquireVsCodeApi();
+          function signup() {
+            vscode.postMessage({ type: 'signup',
+              username: document.getElementById('signupUsername').value.trim(),
+              email: document.getElementById('signupEmail').value.trim(),
+              password: document.getElementById('signupPassword').value.trim()
+            });
+          }
+          function login() {
+            vscode.postMessage({ type: 'login',
+              email: document.getElementById('loginEmail').value.trim(),
+              password: document.getElementById('loginPassword').value.trim()
+            });
+          }
+          window.addEventListener('message', event => {
+            const msg = event.data;
+            if (msg.type === 'signupSuccess') alert('Signup successful! You can now login.');
+            if (msg.type === 'backendError') alert('Server error; please try again.');
+          });
+        </script>
+      </body>
+      </html>
+      `;
     }
 
-    private constructor(panel: vscode.WebviewPanel) {
-        this._panel = panel;
+    // Logged in: show editor UI
+    return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8"><title>Inlyne Editor</title>
+      <style>
+        body { font-family: sans-serif; padding: 1rem; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+        button { padding: .5rem 1rem; }
+        #url { font-weight: bold; margin: .5rem 0; }
+        textarea { width: 100%; height: 300px; }
+        input { width: calc(100% - 110px); padding: .5rem; margin-right: .5rem; }
+      </style>
+    </head>
+    <body>
+      <header>
+        <div>Logged in as: <strong>${email}</strong></div>
+        <button onclick="logout()">Logout</button>
+      </header>
 
-        this._panel.webview.html = this.getWebviewContent();
+      <button id="createBtn">Create New Document</button>
+      <input id="docKeyInput" placeholder="Enter docKey to load">
+      <button id="loadBtn">Load Document</button>
+      <div id="url"></div>
+      <textarea id="editor" disabled></textarea>
 
-        // Listen for messages from the webview
-        this._panel.webview.onDidReceiveMessage(async (message) => {
-            console.log('🔥 Received message from webview:', message); // log for debugging
-            switch (message.type) {
-                case 'createDoc':
-                    await this.createDocument();
-                    break;
-                case 'fetchDoc':
-                    if (message.key) {
-                        await this.fetchDocument(message.key);
-                    }
-                    break;
-            }
+      <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
+      <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.1.1/bundles/stomp.umd.min.js"></script>
+      <script>
+        const vscode = acquireVsCodeApi();
+        const createBtn = document.getElementById('createBtn');
+        const loadBtn   = document.getElementById('loadBtn');
+        const docKeyInput = document.getElementById('docKeyInput');
+        const urlDiv    = document.getElementById('url');
+        const editor    = document.getElementById('editor');
+        let stompClient, docKey;
+
+        createBtn.onclick = () => vscode.postMessage({ type: 'createDoc' });
+        loadBtn.onclick   = () => {
+          let key = docKeyInput.value.trim();
+          if (!key) return;
+          if (key.includes('?docKey=')) key = new URLSearchParams(key.split('?')[1]).get('docKey');
+          else if (key.startsWith('http')) key = key.split('/').pop();
+          vscode.postMessage({ type: 'fetchDoc', key });
+        };
+
+        window.addEventListener('message', event => {
+          const msg = event.data;
+          if (msg.type === 'docCreated') setupEditor(msg.data.url.split('/').pop());
+          if (msg.type === 'docFetched') setupEditor(msg.data.linkKey, msg.data.content);
+          if (msg.type === 'backendError') alert('Server error; please try again.');
         });
 
-        this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
-    }
-
-    public dispose() {
-        InlynePanel.currentPanel = undefined;
-
-        this._panel.dispose();
-
-        while (this._disposables.length) {
-            const x = this._disposables.pop();
-            if (x) {
-                x.dispose();
-            }
+        function setupEditor(key, content = '') {
+          docKey = key;
+          editor.disabled = false;
+          editor.value = content;
+          urlDiv.textContent = 'URL: ?docKey=' + key;
+          connectWS(key);
         }
-    }
 
-    private getWebviewContent(): string {
-        return `
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <title>Inlyne Tab</title>
-            <style>
-                body { font-family: sans-serif; padding: 1rem; }
-                textarea { width: 100%; height: 300px; margin-top: 1rem; }
-                #url { font-weight: bold; margin-top: 0.5rem; }
-                #createBtn, #loadBtn { padding: 0.5rem 1rem; margin-right: 0.5rem; }
-                #docKeyInput { margin-top: 1rem; width: 100%; padding: 0.5rem; }
-            </style>
-        </head>
-        <body>
-            <button id="createBtn">Create New Document</button>
-            <input type="text" id="docKeyInput" placeholder="Enter docKey to load">
-            <button id="loadBtn">Load Document</button>
-            <div id="url"></div>
-            <textarea id="editor" placeholder="Start editing..." disabled></textarea>
-
-            <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
-            <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.1.1/bundles/stomp.umd.min.js"></script>
-
-            <script>
-                const vscode = acquireVsCodeApi();
-                const API_BASE = 'http://localhost:8080';
-                const WS_URL = API_BASE + '/ws';
-
-                let stompClient;
-                let docKey = null;
-
-                const createBtn = document.getElementById('createBtn');
-                const loadBtn = document.getElementById('loadBtn');
-                const docKeyInput = document.getElementById('docKeyInput');
-                const urlDiv = document.getElementById('url');
-                const editor = document.getElementById('editor');
-
-                // Create new document
-                createBtn.addEventListener('click', () => {
-                    vscode.postMessage({ type: 'createDoc' });
-                    console.log('✅ Sent createDoc to extension');
-                });
-
-                // Load existing document
-                loadBtn.addEventListener('click', () => {
-                    let key = docKeyInput.value.trim();
-                    if (!key) return;
-
-                    // --- START: Extract docKey ---
-                    // If full URL with ?docKey=...
-                    if (key.includes('?docKey=')) {
-                        const urlParams = new URLSearchParams(key.split('?')[1]);
-                        key = urlParams.get('docKey');
-                    } else if (key.startsWith('http')) {
-                        // If full URL like /docs/abc123
-                        key = key.split('/').pop();
-                    }
-                    // --- END: Extract docKey ---
-
-                    if (key) {
-                        vscode.postMessage({ type: 'fetchDoc', key: key });
-                        console.log('✅ Sent fetchDoc to extension with key:', key);
-                    } else {
-                        console.error('❌ Could not extract docKey');
-                    }
-                });
-
-                // Listen to editor changes and publish to websocket
-                editor.addEventListener('input', () => {
-                    if (stompClient?.active && docKey) {
-                        stompClient.publish({
-                            destination: '/app/edit/' + docKey,
-                            body: JSON.stringify({ content: editor.value }),
-                        });
-                    }
-                });
-
-                // Listen for messages from the extension
-                window.addEventListener('message', event => {
-                    const message = event.data;
-                    console.log('✅ Received message from extension:', message);
-
-                    switch (message.type) {
-                        case 'docCreated':
-                            handleDocCreated(message.data);
-                            break;
-                        case 'docFetched':
-                            handleDocFetched(message.data);
-                            break;
-                        case 'backendError':
-                            handleBackendError();
-                            break;
-                    }
-                });
-
-                function handleDocCreated(data) {
-                    console.log('handleDocCreated received:', data);
-                    const url = data?.url;
-                    if (!url) {
-                        console.error('❌ No URL in data or data is undefined:', data);
-                        return;
-                    }
-                    const key = url.split('/').pop();
-                    docKey = key;
-                    editor.disabled = false;
-                    editor.value = '';
-                    urlDiv.textContent = \`Document URL: ?docKey=\${key}\`;
-                    connectWebSocket(key);
-                }
-
-                function handleDocFetched(doc) {
-                    console.log('handleDocFetched received:', doc);
-                    docKey = doc.linkKey;
-                    editor.disabled = false;
-                    editor.value = doc.content || '';
-                    urlDiv.textContent = 'Document URL: ?docKey=' + docKey;
-                    connectWebSocket(docKey);
-                }
-
-                function handleBackendError() {
-                    editor.disabled = true;
-                    urlDiv.textContent = 'Backend error. Please try again.';
-                }
-
-                function connectWebSocket(key) {
-                    if (stompClient) {
-                        stompClient.deactivate();
-                    }
-                    stompClient = new StompJs.Client({
-                        webSocketFactory: () => new SockJS(WS_URL),
-                        reconnectDelay: 5000,
-                        heartbeatIncoming: 0,
-                        heartbeatOutgoing: 20000,
-                    });
-
-                    stompClient.onConnect = () => {
-                        console.log('✅ Connected to WebSocket');
-                        stompClient.subscribe('/topic/docs/' + key, msg => {
-                            const { content } = JSON.parse(msg.body);
-                            editor.value = content;
-                        });
-                    };
-
-                    stompClient.onStompError = frame => {
-                        console.error('❌ STOMP error:', frame.headers['message'], frame.body);
-                    };
-
-                    stompClient.activate();
-                }
-            </script>
-        </body>
-        </html>
-        `;
-    }
-
-    // ---- Backend functions ----
-
-    private async createDocument() {
-        console.log('✅ createDocument called');
-        try {
-            const response = await fetch(`${this.API_BASE_URL}/docs`, { 
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type: 'create' })  // match index.html
+        function connectWS(key) {
+          if (stompClient) stompClient.deactivate();
+          stompClient = new StompJs.Client({
+            webSocketFactory: () => new SockJS('${this.API_BASE_URL}/ws'),
+            reconnectDelay: 5000
+          });
+          stompClient.onConnect = () => {
+            stompClient.subscribe('/topic/docs/' + key, msg => {
+              editor.value = JSON.parse(msg.body).content;
             });
-            const data = await response.json();
-            console.log('✅ Document created response FULL:', JSON.stringify(data));
-
-            // Post data back to webview
-            this._panel.webview.postMessage({ type: 'docCreated', data: data });
-            console.log('✅ Document created and sent to webview');
-        } catch (error) {
-            console.error('❌ Error creating document:', error);
-            this._panel.webview.postMessage({ type: 'backendError' });
+          };
+          stompClient.activate();
+          editor.oninput = () => {
+            if (stompClient.active && docKey)
+              stompClient.publish({ destination: '/app/edit/' + docKey,
+                body: JSON.stringify({ content: editor.value })
+              });
+          };
         }
-    }
 
-    private async fetchDocument(key: string) {
-        console.log('✅ fetchDocument called with key:', key);
-        try {
-            const response = await fetch(`${this.API_BASE_URL}/docs?requestType=getDoc&key=${key}`);
-            const data = await response.json();
-            this._panel.webview.postMessage({ type: 'docFetched', data: data });
-            console.log('✅ Document fetched and sent to webview');
-        } catch (error) {
-            console.error('❌ Error fetching document:', error);
-            this._panel.webview.postMessage({ type: 'backendError' });
+        function logout() {
+          vscode.postMessage({ type: 'logout' });
         }
-    }
+      </script>
+    </body>
+    </html>
+    `;
+  }
 }

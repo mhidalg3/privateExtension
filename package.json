@@ -39,7 +39,8 @@
     "@vscode/test-electron": "^2.4.1",
     "eslint": "^9.23.0",
     "typescript": "^5.8.2",
-    "vscode": "^1.1.37"
+    "vscode": "^1.1.37",
+    "@types/vscode": "^1.82.0"
   },
   "dependencies": {
     "node-fetch": "^2.7.0"
