@@ -12,7 +12,8 @@
   ],
   "activationEvents": [
     "onCommand:inlyne.helloWorld",
-    "onView:inlyne.sidebarView"
+    "onView:inlyne.sidebarView",
+    "onCommand:inlyne.openEditorTab"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -20,6 +21,10 @@
       {
         "command": "inlyne.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "inlyne.openEditorTab",
+        "title": "Inlyne: Open Editor Tab"
       }
     ],
     "viewsContainers": {
@@ -39,7 +44,21 @@
           "type": "webview"
         }
       ]
-    }
+    },
+    "customEditors": [
+      {
+        "viewType": "inlyne.editor",
+        "displayName": "Inlyne Editor Tab",
+        "selector": [
+          {
+            "scheme": "inlyne-doc"
+          },
+          {
+            "filenamePattern": "*.inlyne"
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -65,3 +84,4 @@
     "typescript": "^5.8.2"
   }
 }
+
