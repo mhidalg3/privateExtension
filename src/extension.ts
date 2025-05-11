@@ -17,20 +17,28 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('inlyne.openEditorTab', () => {
       InlyneEditorPanel.createOrShow(
         context.extensionUri,
-        InlyneSidebarProvider.currentDocKey
+        InlyneSidebarProvider.currentDocKey,
+        InlyneSidebarProvider.currentContent // pass content to editor panel
       );
     })
   );
 }
 
 export function deactivate() {
+  // Dispose of the current panel if it exists
   InlyneEditorPanel.currentPanel?.dispose();
+  
+  // Close any empty editor groups that might remain, not fully working
+  vscode.commands.executeCommand('workbench.action.closeAllEditors').then(() => {
+    vscode.commands.executeCommand('workbench.action.closeAllGroups');
+  });
 }
 
 // ---------- Sidebar Provider ----------
 class InlyneSidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'inlyne.sidebarView';
   public static currentDocKey: string | null = null;
+  public static currentContent: string = '';
 
   private _view?: vscode.WebviewView;
   private readonly API = 'http://localhost:8080';
@@ -71,6 +79,7 @@ class InlyneSidebarProvider implements vscode.WebviewViewProvider {
       const { url } = await res.json();
       const key = new URL(url).pathname.split('/').pop()!;
       InlyneSidebarProvider.currentDocKey = key;
+      InlyneSidebarProvider.currentContent = ''; // reset content
       this._view?.webview.postMessage({ type: 'docCreated', key });
     } catch {
       this._view?.webview.postMessage({ type: 'backendError' });
@@ -84,6 +93,7 @@ class InlyneSidebarProvider implements vscode.WebviewViewProvider {
       );
       const doc = await res.json();
       InlyneSidebarProvider.currentDocKey = doc.linkKey;
+      InlyneSidebarProvider.currentContent = doc.content || ''; // stores content
       this._view?.webview.postMessage({
         type: 'docLoaded',
         key: doc.linkKey,
@@ -94,7 +104,7 @@ class InlyneSidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private getSidebarHtml(webview: vscode.Webview): string {
+  private getSidebarHtml(webview: vscode.Webview): string { // just sidebar HTML
     const csp = `
       default-src 'none';
       connect-src http://localhost:8080 ws://localhost:8080;
@@ -207,7 +217,8 @@ class InlyneEditorPanel {
 
   public static createOrShow(
     extensionUri: vscode.Uri,
-    key: string | null
+    key: string | null,
+    initialContent?: string
   ) {
     if (!key) {
       vscode.window.showWarningMessage('No document loaded');
@@ -227,7 +238,8 @@ class InlyneEditorPanel {
       InlyneEditorPanel.currentPanel = new InlyneEditorPanel(
         panel,
         extensionUri,
-        key
+        key,
+        initialContent
       );
     }
   }
@@ -235,11 +247,13 @@ class InlyneEditorPanel {
   private constructor(
     private readonly _panel: vscode.WebviewPanel,
     private readonly _extensionUri: vscode.Uri,
-    private readonly _docKey: string
+    private readonly _docKey: string,
+    private readonly _initialContent?: string
   ) {
     this._panel.webview.html = this._getHtml(
       this._panel.webview,
-      this._docKey
+      this._docKey,
+      this._initialContent
     );
     this._panel.onDidDispose(() => this.dispose());
   }
@@ -247,9 +261,12 @@ class InlyneEditorPanel {
   public dispose() {
     InlyneEditorPanel.currentPanel = undefined;
     this._panel.dispose();
+    
+    // Actively close any editor groups that might remain
+    vscode.commands.executeCommand('workbench.action.closeEditorsInGroup');
   }
 
-  private _getHtml(webview: vscode.Webview, key: string): string {
+  private _getHtml(webview: vscode.Webview, key: string, initialContent?: string): string {
     // reuse full sidebar HTML inside editor window
     const csp = `
       default-src 'none';
@@ -297,7 +314,7 @@ class InlyneEditorPanel {
     element: editorDiv,
     extensions: [StarterKit],
     editable: true,
-    content: '<p>Loading…</p>',
+    content: ${initialContent ? `'${initialContent}'` : "'<p>Loading…</p>'"}, 
     onUpdate({ editor }) {
       if (suppress || !docKey || !stompClient?.active) return;
       stompClient.publish({
@@ -309,15 +326,32 @@ class InlyneEditorPanel {
 
   function connect(key) {
     if (stompClient) stompClient.deactivate();
-    stompClient = new StompJs.Client({ webSocketFactory: () => new SockJS('http://localhost:8080/ws') });
-    stompClient.onConnect = () => { status.textContent = 'Live'; };
-    stompClient.activate();
-    stompClient.subscribe('/topic/docs/' + key, msg => {
-      const { content } = JSON.parse(msg.body);
-      suppress = true;
-      editor.commands.setContent(content, false);
-      suppress = false;
+    stompClient = new StompJs.Client({
+      webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
+      reconnectDelay: 5000,
+      heartbeatIncoming: 0,
+      heartbeatOutgoing: 20000
     });
+
+    stompClient.onConnect = () => {
+      status.textContent = '🟢 Live';
+      editor.setEditable(true);
+
+      // **Subscribe here**, once the connection is established
+      stompClient.subscribe('/topic/docs/' + key, msg => {
+        const { content } = JSON.parse(msg.body);
+        suppress = true;
+        editor.commands.setContent(content ?? '<p></p>', false);
+        suppress = false;
+      });
+    };
+
+    stompClient.onStompError = frame => {
+      console.error('STOMP error', frame.headers['message']);
+      status.textContent = '🔴 STOMP error';
+    };
+
+    stompClient.activate();
   }
 
   document.getElementById('btnNew').onclick = async () => {
