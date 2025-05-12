@@ -118,22 +118,69 @@ class InlyneSidebarProvider implements vscode.WebviewViewProvider {
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <style>
-  body { font-family:sans-serif; margin:0; padding:0; }
-  #toolbar { padding:8px; background:#f3f3f3; border-bottom:1px solid #ddd; }
-  #toolbar input, #toolbar button { margin-right:8px; }
-  #status { padding:4px 8px; font-size:0.85em; color:#666; }
-  
+  *, *::before, *::after { box-sizing: border-box; }
+  body { font-family: sans-serif; margin: 0; padding: 0; }
+  #toolbar {
+    display: flex;
+    flex-direction: column;
+    padding: 8px;
+    gap: 8px;
+    background: #f3f3f3;
+    border-bottom: 1px solid #ddd;
+  }
+  .btn {
+    flex: 1;
+    background: white;
+    border: 1px solid #ccc;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background 0.3s;
+  }
+  .btn:hover {
+    background: orange;
+    color: white;
+  }
+  .btn-large {
+    width: 100%;
+  }
+  .load-container {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .load-input {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    border: 1px solid #ccc;
+    font-size: 0.9rem;
+  }
+  #status { padding: 4px 8px; font-size: 0.85em; color: #666; }
+  #editor { padding: 8px; min-height: 200px; border: 1px solid #ccc; }
+  @media (max-width: 320px) {
+    .load-container {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .load-input,
+    .load-container .btn {
+      width: 100%;
+  }
 </style>
 </head>
 <body>
   <div id="toolbar">
-    <button id="btnNew">New</button>
-    <input id="txtKey" placeholder="docKey…">
-    <button id="btnLoad">Load</button>
-    <button id="btnOpen">Open Editor</button>
+    <button id="btnNew" class="btn btn-large">New</button>
+    <div class="load-container">
+      <input id="txtKey" class="load-input" placeholder="docKey…">
+      <button id="btnLoad" class="btn">Load</button>
+    </div>
+    <button id="btnOpen" class="btn btn-large">Open Editor</button>
   </div>
   <div id="status">Ready</div>
-  <div id="editor"></div>
+
 
 <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.1.1/bundles/stomp.umd.min.js"></script>
@@ -281,18 +328,83 @@ class InlyneEditorPanel {
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <style>
-  body { font-family:sans-serif; margin:0; padding:0; }
-  #toolbar { padding:8px; background:#f3f3f3; border-bottom:1px solid #ddd; }
-  #toolbar input, #toolbar button { margin-right:8px; }
-  #status { padding:4px 8px; font-size:0.85em; color:#666; }
-  #editor { padding:8px; min-height:calc(100vh - 100px); border:1px solid #ccc; display:block; }
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    font-family: sans-serif;
+    margin: 0;
+    padding: 0;
+  }
+
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    background: #f3f3f3;
+    border-bottom: 1px solid #ddd;
+  }
+
+  .btn {
+    background: white;
+    border: 1px solid #ccc;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.3s;
+  }
+  .btn:hover {
+    background: orange;
+    color: white;
+  }
+
+  .btn-large {
+    flex: 0 0 auto;   
+  }
+
+  
+  .load-input {
+    flex: 1;
+    padding: 0.4rem 0.6rem;   
+    border: 1px solid #ccc;
+    font-size: 0.8rem;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .load-input:focus {
+    outline: none;
+    border-color: orange;
+    box-shadow: 0 0 0 2px rgba(255,165,0,0.3);
+  }
+
+  #status {
+    padding: 4px 8px;
+    font-size: 0.85em;
+    color: #666;
+  }
+  #editor {
+    padding: 8px;
+    min-height: calc(100vh - 100px);
+    border: 1px solid #ccc;
+    display: block;
+  }
+  
+  @media (max-width: 320px) {
+    #toolbar {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .btn, .load-input {
+      width: 100%;
+      margin: 0;
+    }
+  }
 </style>
 </head>
 <body>
   <div id="toolbar">
-    <button id="btnNew">New</button>
-    <input id="txtKey" placeholder="docKey…" value="${key}">
-    <button id="btnLoad">Load</button>
+    <button id="btnNew" class="btn btn-large">New</button>
+    <input id="txtKey" class="load-input" placeholder="docKey…" value="${key}">
+    <button id="btnLoad" class="btn">Load</button>
   </div>
   <div id="status">Editor for ${key}</div>
   <div id="editor"></div>
@@ -314,7 +426,7 @@ class InlyneEditorPanel {
     element: editorDiv,
     extensions: [StarterKit],
     editable: true,
-    content: ${initialContent ? `'${initialContent}'` : "'<p>Loading…</p>'"}, 
+    content: ${initialContent ? `'${initialContent}'` : "'<p>Edit Here!</p>'"}, 
     onUpdate({ editor }) {
       if (suppress || !docKey || !stompClient?.active) return;
       stompClient.publish({
