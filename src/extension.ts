@@ -329,74 +329,28 @@ class InlyneEditorPanel {
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <style>
   *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; padding: 0; font-family: sans-serif; }
 
-  body {
-    font-family: sans-serif;
-    margin: 0;
-    padding: 0;
-  }
+  /* Toolbar */ 
+  #toolbar { display: flex; align-items: center; gap: 8px; padding: 8px; background: #f3f3f3; border-bottom: 1px solid #ddd; }
+  .btn { background: white; border: 1px solid #ccc; padding: 0.5rem 0.75rem; font-size: 0.9rem; cursor: pointer; transition: background 0.3s; }
+  .btn:hover { background: orange; color: white; }
+  .load-input { flex: 1; padding: 0.5rem 0.75rem; border: 1px solid #ccc; font-size: 0.9rem; transition: border-color 0.2s, box-shadow 0.2s; }
+  .load-input:focus { outline: none; border-color: orange; box-shadow: 0 0 0 2px rgba(255,165,0,0.3); }
 
-  #toolbar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px;
-    background: #f3f3f3;
-    border-bottom: 1px solid #ddd;
-  }
+  /* Menubar (new) */
+  #menubar { padding: 4px 8px; background: #fafafa; border-bottom: 1px solid #ddd; display: flex; gap: 4px; }
+  #menubar button { background: white; border: 1px solid #ccc; padding: 0.4rem; cursor: pointer; transition: background 0.3s; }
+  #menubar button:hover { background: orange; color: white; }
 
-  .btn {
-    background: white;
-    border: 1px solid #ccc;
-    padding: 0.4rem 0.6rem;
-    font-size: 0.8rem;
-    cursor: pointer;
-    transition: background 0.3s;
-  }
-  .btn:hover {
-    background: orange;
-    color: white;
-  }
+  /* Editor area */
+  #status { padding: 4px 8px; font-size: 0.85em; color: #666; }
+  #editor { padding: 8px; min-height: calc(100vh - 160px); border: 1px solid #ccc; }
 
-  .btn-large {
-    flex: 0 0 auto;   
-  }
-
-  
-  .load-input {
-    flex: 1;
-    padding: 0.4rem 0.6rem;   
-    border: 1px solid #ccc;
-    font-size: 0.8rem;
-    transition: border-color 0.2s, box-shadow 0.2s;
-  }
-  .load-input:focus {
-    outline: none;
-    border-color: orange;
-    box-shadow: 0 0 0 2px rgba(255,165,0,0.3);
-  }
-
-  #status {
-    padding: 4px 8px;
-    font-size: 0.85em;
-    color: #666;
-  }
-  #editor {
-    padding: 8px;
-    min-height: calc(100vh - 100px);
-    border: 1px solid #ccc;
-    display: block;
-  }
-  
+  /* Responsive */
   @media (max-width: 320px) {
-    #toolbar {
-      flex-direction: column;
-      align-items: stretch;
-    }
-    .btn, .load-input {
-      width: 100%;
-      margin: 0;
-    }
+    #toolbar, #menubar { flex-direction: column; align-items: stretch; }
+    .btn, .load-input { width: 100%; margin: 0; }
   }
 </style>
 </head>
@@ -406,6 +360,16 @@ class InlyneEditorPanel {
     <input id="txtKey" class="load-input" placeholder="docKey…" value="${key}">
     <button id="btnLoad" class="btn">Load</button>
   </div>
+  <div id="menubar">
+    <button data-action="bold"><b>B</b></button>
+    <button data-action="italic"><i>I</i></button>
+    <button data-action="heading">H1</button>
+    <button data-action="align-left">L</button>
+    <button data-action="align-center">C</button>
+    <button data-action="align-right">R</button>
+    <button data-action="highlight">🔆</button>
+    <button data-action="image">🖼️</button>
+  </div>
   <div id="status">Editor for ${key}</div>
   <div id="editor"></div>
 
@@ -413,80 +377,132 @@ class InlyneEditorPanel {
 <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.1.1/bundles/stomp.umd.min.js"></script>
 <script type="module">
   import { Editor } from 'https://esm.sh/@tiptap/core@2';
-  import StarterKit from 'https://esm.sh/@tiptap/starter-kit@2';
-  const editorDiv = document.getElementById('editor');
-  const status = document.getElementById('status');
-  const vscode = acquireVsCodeApi();
+    import StarterKit from 'https://esm.sh/@tiptap/starter-kit@2';
+    import TextAlign from 'https://esm.sh/@tiptap/extension-text-align@2';
+    import Highlight from 'https://esm.sh/@tiptap/extension-highlight@2';
+    import Image from 'https://esm.sh/@tiptap/extension-image@2';
+    import Placeholder from 'https://esm.sh/@tiptap/extension-placeholder@2';
 
-  let docKey = '${key}';
-  let stompClient;
-  let suppress = false;
+    const vscode = acquireVsCodeApi();
+    let docKey = '${key}';
+    let stompClient;
+    let suppress = false;
 
-  const editor = new Editor({
-    element: editorDiv,
-    extensions: [StarterKit],
-    editable: true,
-    content: ${initialContent ? `'${initialContent}'` : "'<p>Edit Here!</p>'"}, 
-    onUpdate({ editor }) {
-      if (suppress || !docKey || !stompClient?.active) return;
-      stompClient.publish({
-        destination: '/app/edit/' + docKey,
-        body: JSON.stringify({ content: editor.getHTML() })
-      });
-    }
-  });
-
-  function connect(key) {
-    if (stompClient) stompClient.deactivate();
-    stompClient = new StompJs.Client({
-      webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
-      reconnectDelay: 5000,
-      heartbeatIncoming: 0,
-      heartbeatOutgoing: 20000
+    const editor = new Editor({
+      element: document.getElementById('editor'),
+      editable: true,
+      extensions: [
+        StarterKit,
+        TextAlign.configure({ types: ['heading', 'paragraph'] }),
+        Highlight,
+        Image,
+        Placeholder.configure({ placeholder: 'Type your docs here…' }),
+      ],
+      content: ${initialContent ? JSON.stringify(initialContent) : "'<p>Edit Here!</p>'"},
+      autofocus: true,
+      onUpdate: ({ editor }) => {
+        if (suppress) return;
+        
+        const html = editor.getHTML();
+        vscode.postMessage({ type: 'contentUpdate', html });
+        
+        if (stompClient?.active) {
+          stompClient.publish({
+            destination: '/app/edit/' + docKey, 
+            body: JSON.stringify({ content: html })
+          });
+        }
+      }
     });
 
-    stompClient.onConnect = () => {
-      status.textContent = '🟢 Live';
+    // Ensure editor is focusable and editable
+    setTimeout(() => {
       editor.setEditable(true);
+      editor.commands.focus();
+    }, 100);
 
-      // **Subscribe here**, once the connection is established
-      stompClient.subscribe('/topic/docs/' + key, msg => {
-        const { content } = JSON.parse(msg.body);
-        suppress = true;
-        editor.commands.setContent(content ?? '<p></p>', false);
-        suppress = false;
+    function connect(key) {
+      if (stompClient) stompClient.deactivate();
+      stompClient = new StompJs.Client({ webSocketFactory: () => new SockJS('http://localhost:8080/ws') });
+      stompClient.onConnect = () => {
+        document.getElementById('status').textContent = '🟢 Connected to ' + key;
+        
+        stompClient.subscribe('/topic/docs/' + key, msg => {
+          const { content } = JSON.parse(msg.body);
+          if (editor.getHTML() !== content) {
+            suppress = true;
+            editor.commands.setContent(content || '<p></p>', false);
+            suppress = false;
+          }
+        });
+      };
+      
+      stompClient.onStompError = frame => {
+        console.error('STOMP error', frame.headers['message']);
+        document.getElementById('status').textContent = '🔴 Connection error';
+      };
+      
+      stompClient.activate();
+    }
+
+    // Toolbar actions
+    document.getElementById('btnNew').onclick = async () => {
+      try {
+        const res = await fetch('http://localhost:8080/docs', {
+          method: 'POST', 
+          headers: {'Content-Type':'application/json'}, 
+          body: JSON.stringify({type:'create'})
+        });
+        const { url } = await res.json();
+        docKey = new URL(url).pathname.split('/').pop();
+        document.getElementById('txtKey').value = docKey;
+        document.getElementById('status').textContent = 'Created ' + docKey;
+        connect(docKey);
+        editor.commands.setContent('<p></p>');
+      } catch (err) {
+        document.getElementById('status').textContent = '🔴 Error creating document';
+      }
+    };
+    
+    document.getElementById('btnLoad').onclick = async () => {
+      const key = document.getElementById('txtKey').value.trim();
+      if (!key) return;
+      
+      try {
+        const res = await fetch(\`http://localhost:8080/docs?requestType=getDoc&key=\${key}\`);
+        const doc = await res.json();
+        docKey = doc.linkKey;
+        document.getElementById('status').textContent = 'Loaded ' + docKey;
+        editor.commands.setContent(doc.content || '<p></p>', false);
+        connect(docKey);
+      } catch (err) {
+        document.getElementById('status').textContent = '🔴 Error loading document';
+      }
+    };
+
+    // Menubar actions
+    document.querySelectorAll('#menubar button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = btn.getAttribute('data-action');
+        switch (action) {
+          case 'bold': editor.chain().focus().toggleBold().run(); break;
+          case 'italic': editor.chain().focus().toggleItalic().run(); break;
+          case 'heading': editor.chain().focus().toggleHeading({ level: 1 }).run(); break;
+          case 'align-left': editor.chain().focus().setTextAlign('left').run(); break;
+          case 'align-center': editor.chain().focus().setTextAlign('center').run(); break;
+          case 'align-right': editor.chain().focus().setTextAlign('right').run(); break;
+          case 'highlight': editor.chain().focus().toggleHighlight().run(); break;
+          case 'image': {
+            const url = prompt('Image URL');
+            if (url) editor.chain().focus().setImage({ src: url }).run();
+            break;
+          }
+        }
       });
-    };
-
-    stompClient.onStompError = frame => {
-      console.error('STOMP error', frame.headers['message']);
-      status.textContent = '🔴 STOMP error';
-    };
-
-    stompClient.activate();
-  }
-
-  document.getElementById('btnNew').onclick = async () => {
-    const res = await fetch('http://localhost:8080/docs', {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({type:'create'})
     });
-    const { url } = await res.json();
-    docKey = new URL(url).pathname.split('/').pop();
-    connect(docKey);
-    status.textContent = 'Created ' + docKey;
-  };
-  document.getElementById('btnLoad').onclick = async () => {
-    const key = document.getElementById('txtKey').value.trim();
-    const res = await fetch('http://localhost:8080/docs?requestType=getDoc&key=${key}');
-    const doc = await res.json();
-    docKey = doc.linkKey;
-    editor.commands.setContent(doc.content || '<p></p>', false);
-    connect(docKey);
-    status.textContent = 'Loaded ' + docKey;
-  };
 
-  // Initial connect
-  connect(docKey);
+    // Initial sync
+    connect(docKey);
 </script>
 </body>
 </html>`;
