@@ -14,13 +14,33 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register the "Open Editor" command
   context.subscriptions.push(
-    vscode.commands.registerCommand('inlyne.openEditorTab', () => {
-      InlyneEditorPanel.createOrShow(
-        context.extensionUri,
-        InlyneSidebarProvider.currentDocKey,
-        InlyneSidebarProvider.currentContent // pass content to editor panel
-      );
+    vscode.commands.registerCommand('inlyne.openEditorTab', async (keyArg?: string) => {
+      const key = keyArg || InlyneSidebarProvider.currentDocKey;
+      if (!key) {
+        return vscode.window.showWarningMessage('No Inlyne DocKey to open');
+      }
+  
+      // fetch the latest content for that key
+      let content = InlyneSidebarProvider.currentContent;
+      try {
+        const res = await fetch(`http://localhost:8080/docs?requestType=getDoc&key=${key}`);
+        const doc = await res.json();
+        content = doc.content || '';
+        InlyneSidebarProvider.currentContent = content;
+        InlyneSidebarProvider.currentDocKey = key;
+      } catch (e) {
+        console.error('Could not fetch Inlyne document:', e);
+      }
+  
+      InlyneEditorPanel.createOrShow(context.extensionUri, key, content);
     })
+  );
+
+  context.subscriptions.push(
+    vscode.languages.registerDocumentLinkProvider(
+      { scheme: 'file' },
+      new InlyneLinkProvider()
+    )
   );
 }
 
@@ -32,6 +52,35 @@ export function deactivate() {
   vscode.commands.executeCommand('workbench.action.closeAllEditors').then(() => {
     vscode.commands.executeCommand('workbench.action.closeAllGroups');
   });
+}
+
+// ---------- Document Link Provider ----------
+class InlyneLinkProvider implements vscode.DocumentLinkProvider {
+  // match DocKey{some_key} anywhere
+  private _regex = /DocKey\{([^}]+)\}/g;
+
+  public provideDocumentLinks(
+    doc: vscode.TextDocument
+  ): vscode.ProviderResult<vscode.DocumentLink[]> {
+    const text = doc.getText();
+    const links: vscode.DocumentLink[] = [];
+    let m: RegExpExecArray | null;
+
+    while ((m = this._regex.exec(text))) {
+      const start = doc.positionAt(m.index);
+      const end   = doc.positionAt(m.index + m[0].length);
+      const key   = m[1];
+
+      // build a command URI: command:inlyne.openEditorTab?["theKey"]
+      const args = encodeURIComponent(JSON.stringify([key]));
+      const target = vscode.Uri.parse(`command:inlyne.openEditorTab?${args}`);
+
+      links.push(
+        new vscode.DocumentLink(new vscode.Range(start, end), target)
+      );
+    }
+    return links;
+  }
 }
 
 // ---------- Sidebar Provider ----------
@@ -343,9 +392,12 @@ class InlyneEditorPanel {
   #menubar button { background: white; border: 1px solid #ccc; padding: 0.4rem; cursor: pointer; transition: background 0.3s; }
   #menubar button:hover { background: orange; color: white; }
 
+  .ProseMirror {
+    white-space: pre-wrap; 
+  }
   /* Editor area */
   #status { padding: 4px 8px; font-size: 0.85em; color: #666; }
-  #editor { padding: 8px; min-height: calc(100vh - 160px); border: 1px solid #ccc; }
+  #editor { margin: 0 8px; padding: 8px; min-height: calc(100vh - 160px); border: 1px solid #ccc; }
 
   /* Responsive */
   @media (max-width: 320px) {
