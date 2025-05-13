@@ -13,6 +13,13 @@
   "activationEvents": [
     "onCommand:inlyne.helloWorld",
     "onView:inlyne.sidebarView",
+    "onCommand:inlyne.openEditorTab",
+    "onStartupFinished",
+    "onLanguage:javascript",
+    "onLanguage:typescript",
+    "onLanguage:python",
+    "onCommand:inlyne.helloWorld",
+    "onView:inlyne.sidebarView",
     "onCommand:inlyne.openEditorTab"
   ],
   "main": "./out/extension.js",
