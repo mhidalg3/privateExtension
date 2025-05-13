@@ -394,10 +394,25 @@ class InlyneEditorPanel {
 
   .ProseMirror {
     white-space: pre-wrap; 
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    outline: none;
   }
   /* Editor area */
   #status { padding: 4px 8px; font-size: 0.85em; color: #666; }
-  #editor { margin: 0 8px; padding: 8px; min-height: calc(100vh - 160px); border: 1px solid #ccc; }
+  #editor { 
+    margin: 0 8px; 
+    padding: 8px; 
+    min-height: calc(100vh - 160px); 
+    border: 1px solid #ccc; 
+    display: flex; 
+    flex-direction: column;
+    position: relative;
+  }
+  #editor:focus-within { border-color: orange; box-shadow: 0 0 0 2px rgba(255,165,0,0.3); }
+  
 
   /* Responsive */
   @media (max-width: 320px) {
