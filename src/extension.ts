@@ -15,7 +15,7 @@ class InlynePanel {
   private static currentPanel: InlynePanel | undefined;
   private readonly panel: vscode.WebviewPanel;
   private readonly context: vscode.ExtensionContext;
-  private readonly API_BASE_URL = 'http://localhost:8080';
+  private readonly API_BASE_URL = 'http://api.inlyne.link';
   private disposables: vscode.Disposable[] = [];
 
   private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext) {
