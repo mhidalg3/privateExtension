@@ -1,9 +1,9 @@
-
 {
   "name": "inlyne",
   "displayName": "Inlyne",
-  "description": "",
+  "description": "VS Code sidebar editor with TipTap and live-sync via a Docker API",
   "version": "0.0.1",
+  "publisher": "your-publisher-id",
   "engines": {
     "vscode": "^1.99.0"
   },
@@ -11,39 +11,83 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:inlyne.openPanel"
+    "onCommand:inlyne.helloWorld",
+    "onView:inlyne.sidebarView",
+    "onCommand:inlyne.openEditorTab",
+    "onStartupFinished",
+    "onLanguage:javascript",
+    "onLanguage:typescript",
+    "onLanguage:python",
+    "onCommand:inlyne.helloWorld",
+    "onView:inlyne.sidebarView",
+    "onCommand:inlyne.openEditorTab"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "inlyne.openPanel",
-        "title": "Open Inlyne Tab"
+        "command": "inlyne.helloWorld",
+        "title": "Hello World"
+      },
+      {
+        "command": "inlyne.openEditorTab",
+        "title": "Inlyne: Open Editor Tab"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "inlyne-sidebar",
+          "title": "Inlyne",
+          "icon": "media/extension.svg"
+        }
+      ]
+    },
+    "views": {
+      "inlyne-sidebar": [
+        {
+          "id": "inlyne.sidebarView",
+          "name": "Documentation",
+          "type": "webview"
+        }
+      ]
+    },
+    "customEditors": [
+      {
+        "viewType": "inlyne.editor",
+        "displayName": "Inlyne Editor Tab",
+        "selector": [
+          {
+            "scheme": "inlyne-doc"
+          },
+          {
+            "filenamePattern": "*.inlyne"
+          }
+        ]
       }
     ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "watch": "tsc -w -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test"
+  },
+  "dependencies": {
+    "node-fetch": "^2.7.0"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
     "@types/node-fetch": "^2.6.12",
+    "@types/vscode": "^1.100.0",
     "@typescript-eslint/eslint-plugin": "^8.28.0",
     "@typescript-eslint/parser": "^8.28.0",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.4.1",
     "eslint": "^9.23.0",
-    "typescript": "^5.8.2",
-    "vscode": "^1.1.37",
-    "@types/vscode": "^1.82.0"
-  },
-  "dependencies": {
-    "node-fetch": "^2.7.0"
+    "typescript": "^5.8.2"
   }
 }
