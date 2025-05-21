@@ -136,7 +136,7 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
       switch (msg.type) {
         case 'signIn':
           // opens your backend’s deep-link URL
-          vscode.env.openExternal(vscode.Uri.parse(`https://inlyne.link`));
+          vscode.env.openExternal(vscode.Uri.parse(`https://inlyne.link/vscodeauth?redirect=vscode://inlyneio.inlyne/auth`));
           break;
         case 'signOut':
           await this.context.globalState.update('inlyneToken', undefined);
@@ -146,7 +146,7 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
           const token = this.context.globalState.get<string>('inlyneToken');
           if (!token) {
             // not authed → send user to sign in
-            return vscode.env.openExternal(vscode.Uri.parse(`https://inlyne.link`));
+            return vscode.env.openExternal(vscode.Uri.parse(`https://inlyne.link/vscodeauth?redirect=vscode://inlyneio.inlyne/auth`));
           }
           // otherwise do the normal create
           return this.createDoc();
@@ -155,7 +155,8 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
           await this.loadDoc(msg.key);
           break;
         case 'openEditor':
-          await vscode.commands.executeCommand('inlyne.openEditorTab');
+          // pass the typed key into your command
+          await vscode.commands.executeCommand('inlyne.openEditorTab', msg.key);
           break;
       }
     });
@@ -196,34 +197,54 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
 
   private async loadDoc(key: string) {
     const token = this.context.globalState.get<string>('inlyneToken');
-    // Build headers: include Authorization if we have a token
     const headers: Record<string,string> = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
 
     try {
-      //  → GET https://api.inlyne.link/<docKey>
-      const res = await fetch(`${this.API}/${key}`, {
-        method: 'GET',
-        headers
-      });
+      const res = await fetch(`${this.API}/${key}`, { method: 'GET', headers });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.details || data.message || 'Load failed');
 
-      // spec says authorized responses include content; public ones just linkKey
-      const doc = data.doc;
-      const content = doc.content ?? '';
-      const linkKey = doc.linkKey;
+      // 1) if the server says “unauthorized”:
+      if (!res.ok) {
+        if (data.responseType === 'unauthorized') {
+          this._view?.webview.postMessage({
+            type: 'backendError',
+            message: '🔒 This document is private. Please sign in to access it.'
+          });
+        } else {
+          this._view?.webview.postMessage({
+            type: 'backendError',
+            message: data.details ?? data.message ?? `Load failed (${res.status})`
+          });
+        }
+        return;
+      }
 
-      InlyneSidebarProvider.currentDocKey  = linkKey;
-      InlyneSidebarProvider.currentContent = content;
+      // 2) on success we have an `accessLevel` field
+      const access = data.accessLevel as 'public'|'reader'|'writer';
+      const doc    = data.doc as { linkKey: string; content?: string; isPublic: boolean };
+
+      // save what key we _actually_ opened
+      InlyneSidebarProvider.currentDocKey  = doc.linkKey;
+      InlyneSidebarProvider.currentContent = (access === 'public')
+        ? ''            // public docs only return linkKey
+        : (doc.content ?? '');
+
+      // tell the webview “we loaded”
       this._view?.webview.postMessage({
         type:    'docLoaded',
-        key:     linkKey,
-        content: content
+        key:     doc.linkKey,
+        content: InlyneSidebarProvider.currentContent
       });
+
     } catch (err: any) {
       console.error(err);
-      this._view?.webview.postMessage({ type: 'backendError', message: err.message });
+      this._view?.webview.postMessage({
+        type: 'backendError',
+        message: err.message || 'Unknown error'
+      });
     }
   }
 
@@ -320,7 +341,10 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
         const key = document.getElementById('txtKey').value.trim();
         vscode.postMessage({ type:'loadDoc', key });
       };
-      document.getElementById('btnOpen').onclick   = () => vscode.postMessage({ type:'openEditor' });
+      document.getElementById('btnOpen').onclick = () => {
+        const key = document.getElementById('txtKey').value.trim();
+        vscode.postMessage({ type: 'openEditor', key });
+      };
 
       window.addEventListener('message', e => {
         const m = e.data;
