@@ -3,6 +3,17 @@ import * as vscode from 'vscode';
 import fetch from 'node-fetch';
 import { InlyneUriHandler } from './uriHandler';
 
+function normalizeKey(input: string): string {
+  try {
+    const url = new URL(input);
+    // strip leading slash(es)
+    return url.pathname.replace(/^\/+/, '');
+  } catch {
+    // not a valid URL, assume it's already the key
+    return input;
+  }
+}
+
 export function activate(context: vscode.ExtensionContext) {
   console.log('Inlyne is active');
 
@@ -13,7 +24,9 @@ export function activate(context: vscode.ExtensionContext) {
   // Register the "Open Editor" command
   context.subscriptions.push(
     vscode.commands.registerCommand('inlyne.openEditorTab', async (keyArg?: string) => {
-      const key = keyArg || InlyneSidebarProvider.currentDocKey;
+      // allow full URLs or raw keys
+      const raw = keyArg || InlyneSidebarProvider.currentDocKey;
+      const key = raw ? normalizeKey(raw) : undefined;
       if (!key) {
         return vscode.window.showWarningMessage('No Inlyne DocKey to open');
       }
@@ -41,11 +54,27 @@ export function activate(context: vscode.ExtensionContext) {
         }
         InlyneSidebarProvider.currentContent = content;
         InlyneSidebarProvider.currentDocKey = key;
+
+        InlyneSidebarProvider.currentView?.webview.postMessage({
+          type:    'docLoaded',
+          key,
+          content
+        });
       } catch (e) {
         console.error('Could not fetch Inlyne document:', e);
       }
       
       InlyneEditorPanel.createOrShow(context.extensionUri, key, content);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('inlyne.refreshSidebarAuth', () => {
+      const token = context.globalState.get<string>('inlyneToken');
+      InlyneSidebarProvider.currentView?.webview.postMessage({
+        type: 'authChanged',
+        token
+      });
     })
   );
 
@@ -111,8 +140,10 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
   public static currentView?: vscode.WebviewView;
 
 
+  
   private _view?: vscode.WebviewView;
   private readonly API = 'https://api.inlyne.link';
+
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -135,8 +166,7 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
     view.webview.onDidReceiveMessage(async msg => {
       switch (msg.type) {
         case 'signIn':
-          // opens your backend’s deep-link URL
-          vscode.env.openExternal(vscode.Uri.parse(`https://inlyne.link/vscodeauth?redirect=vscode://inlyneio.inlyne/auth`));
+          AuthPanel.createOrShow(this.context);
           break;
         case 'signOut':
           await this.context.globalState.update('inlyneToken', undefined);
@@ -146,17 +176,25 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
           const token = this.context.globalState.get<string>('inlyneToken');
           if (!token) {
             // not authed → send user to sign in
-            return vscode.env.openExternal(vscode.Uri.parse(`https://inlyne.link/vscodeauth?redirect=vscode://inlyneio.inlyne/auth`));
+            return AuthPanel.createOrShow(this.context);
           }
           // otherwise do the normal create
           return this.createDoc();
         }
         case 'loadDoc':
-          await this.loadDoc(msg.key);
+          // accept either a URL or a bare key
+          const key = normalizeKey(msg.key.trim());
+          await this.loadDoc(key);
+          // open popout editor (needed?)
+          await vscode.commands.executeCommand('inlyne.openEditorTab', key);
           break;
-        case 'openEditor':
-          // pass the typed key into your command
-          await vscode.commands.executeCommand('inlyne.openEditorTab', msg.key);
+        case 'keyChanged':
+          // update the current key in the sidebar
+          InlyneSidebarProvider.currentDocKey = msg.key;
+          InlyneEditorPanel.currentPanel?.postMessage({
+            type: 'externalKeyChanged',
+            key: msg.key
+          });
           break;
       }
     });
@@ -264,9 +302,22 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <style>
       *, *::before, *::after { box-sizing: border-box; }
-      body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 0.9rem; color: #333; }
-
+      html, body {
+        height: 100vh;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 0.9rem;
+        color: #333;
+        display: flex;
+        flex-direction: column;
+      }
       #toolbar {
+        flex: 0 0 auto;
         display: flex;
         flex-direction: column;
         gap: 8px;
@@ -278,6 +329,7 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
       .btn {
         width: 100%;
         padding: 6px 0;
+        align-items: center;
         border: none;
         border-radius: 4px;
         background: #fff;
@@ -286,9 +338,9 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
         cursor: pointer;
         transition: background 0.2s;
       }
-      .btn:hover { background: #f6f8fa; }
+      .btn:hover { background:rgb(236,109,38); }
 
-      .load-container { display: flex; gap: 8px; }
+      .load-container { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; align-items: center; }
       .load-input {
         flex: 1;
         padding: 6px 8px;
@@ -298,23 +350,30 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
       }
       .load-input:focus {
         outline: none;
-        border-color: #0366d6;
-        box-shadow: 0 0 0 2px rgba(3,102,214,0.2);
+        border-color: rgb(236,109,38);
+        box-shadow: 0 0 0 2px rgba(184, 87, 31, 0.84);
       }
 
       #userInfo {
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
         padding: 6px 8px;
         font-size: 0.8rem;
         color: #586069;
-        background: #f6f8fa;
-        border-bottom: 1px solid #e1e4e8;
+        background: #f3f3f3;
       }
 
       #status {
-        padding: 6px 8px;
-        font-size: 0.8rem;
+        flex: 1 1 auto;
+        min-height: 0px;
         color: #586069;
+        background: #f3f3f3;
+        padding: 4px 8px;
+        font-size: 0.85em;
+        overflow: auto;
       }
+      
     </style>
   </head>
   <body>
@@ -326,25 +385,39 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
         <input  id="txtKey"  class="load-input" placeholder="Document Key…">
         <button id="btnLoad" class="btn" style="width:auto; padding:6px 12px;">Load</button>
       </div>
-      <button id="btnOpen" class="btn">Open Editor</button>
     </div>
-    <div id="userInfo">Not signed in</div>
-    <div id="status">Ready</div>
+    <div id="userInfo">User Status: Not signed in</div>
+    <div id="status">Doc Status: Ready</div>
 
     <script>
       const vscode = acquireVsCodeApi();
+      const docKey = document.getElementById('txtKey');
+      
+      // user types key notift the extension
+      txtKey.addEventListener('input', () => {
+        vscode.postMessage({
+          type: 'keyChanged',
+          key: txtKey.value
+        });
+      });
+      // reflect chhanges from popout textbox
+      window.addEventListener('message', e => {
+        const m = e.data;
+        if (m.type === 'externalKeyChanged') {
+          docKey.value = m.key;
+        }
+      });
 
+      // Handle the "Sign In" and "Sign Out" buttons
       document.getElementById('btnSignIn').onclick  = () => vscode.postMessage({ type:'signIn' });
       document.getElementById('btnSignOut').onclick = () => vscode.postMessage({ type:'signOut' });
+      
       document.getElementById('btnNew').onclick     = () => vscode.postMessage({ type:'createDoc' });
       document.getElementById('btnLoad').onclick    = () => {
         const key = document.getElementById('txtKey').value.trim();
         vscode.postMessage({ type:'loadDoc', key });
       };
-      document.getElementById('btnOpen').onclick = () => {
-        const key = document.getElementById('txtKey').value.trim();
-        vscode.postMessage({ type: 'openEditor', key });
-      };
+
 
       window.addEventListener('message', e => {
         const m = e.data;
@@ -354,16 +427,16 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
           document.getElementById('btnSignOut').style.display = signedIn ? 'block' : 'none';
           document.getElementById('userInfo').textContent =
             signedIn
-              ? 'Signed in as: ' + (m.username || 'Unknown User')
-              : 'Not signed in';
+              ? 'User Status: Signed in as: ' + (m.username || 'Unknown User')
+              : 'User Status: Not signed in';
 
         }
         if (m.type === 'docCreated') {
-          document.getElementById('status').textContent = 'Created ' + m.key;
+          document.getElementById('status').textContent = 'Doc Status: Created ' + m.key;
         } else if (m.type === 'docLoaded') {
-          document.getElementById('status').textContent = 'Loaded ' + m.key;
+          document.getElementById('status').textContent = 'Doc Status: Loaded ' + m.key;
         } else if (m.type === 'backendError') {
-          document.getElementById('status').textContent = 'Error: ' + m.message;
+          document.getElementById('status').textContent = 'Dos Status Error: ' + m.message;
         }
       });
     </script>
@@ -376,6 +449,20 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
 // ---------- Pop-out Editor Panel ----------
 class InlyneEditorPanel {
   public static currentPanel: InlyneEditorPanel | undefined;
+  private readonly API = 'https://api.inlyne.link';
+
+  public postMessage(message: any) {
+    this._panel.webview.postMessage(message);
+  }
+
+  public update(key: string, content: string) {
+    this._docKey = key;
+    this._panel.webview.postMessage({
+      type: 'editorDocLoaded',
+      key,
+      content
+    });
+  }
 
   public static createOrShow(
     extensionUri: vscode.Uri,
@@ -389,8 +476,13 @@ class InlyneEditorPanel {
 
     const column = vscode.ViewColumn.Beside;
     if (InlyneEditorPanel.currentPanel) {
+     // InlyneEditorPanel.currentPanel._panel.reveal(column);
+     // reveal and refresh with the new key+content
       InlyneEditorPanel.currentPanel._panel.reveal(column);
-    } else {
+      InlyneEditorPanel.currentPanel.update(key, initialContent ?? '');
+       return;
+    } 
+    else {
       const panel = vscode.window.createWebviewPanel(
         'inlyneEditor',
         `Inlyne: ${key}`,
@@ -409,7 +501,7 @@ class InlyneEditorPanel {
   private constructor(
     private readonly _panel: vscode.WebviewPanel,
     private readonly _extensionUri: vscode.Uri,
-    private readonly _docKey: string,
+    private _docKey: string,
     private readonly _initialContent?: string
   ) {
     this._panel.webview.html = this._getHtml(
@@ -417,6 +509,45 @@ class InlyneEditorPanel {
       this._docKey,
       this._initialContent
     );
+    this._panel.webview.onDidReceiveMessage(async msg => {
+      if (msg.type === 'loadEditorDoc' && msg.key) {
+        const raw = msg.key.trim();
+        const key = normalizeKey(raw);
+        try {
+          // fetch via your server API
+          const res = await fetch(`${this.API}/${key}`);
+          const data = await res.json();
+          const newKey = data.doc?.linkKey || key;
+          const content = data.doc?.content ?? '';
+          // send the loaded content back into the same webview
+          this._panel.webview.postMessage({
+            type: 'editorDocLoaded',
+            key: newKey,
+            content
+          });
+          InlyneSidebarProvider.currentDocKey  = newKey;
+          InlyneSidebarProvider.currentContent = content;
+          InlyneSidebarProvider.currentView?.webview.postMessage({
+            type:    'docLoaded',
+            key:     newKey,
+            content
+          });
+        } catch (err) {
+          console.error('Error loading in popout:', err);
+          this._panel.webview.postMessage({
+            type: 'editorDocError',
+            message: String(err)
+          });
+        }
+      }
+      if (msg.type === 'keyChanged') {
+        this._docKey = msg.key;
+        InlyneSidebarProvider.currentView?.webview.postMessage({
+          type: "externalKeyChanged",
+          key: msg.key
+        });
+      }
+    });
     this._panel.onDidDispose(() => this.dispose());
   }
 
@@ -509,7 +640,7 @@ class InlyneEditorPanel {
 <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.1.1/bundles/stomp.umd.min.js"></script>
 <script type="module">
-  import { Editor } from 'https://esm.sh/@tiptap/core@2';
+    import { Editor } from 'https://esm.sh/@tiptap/core@2';
     import StarterKit from 'https://esm.sh/@tiptap/starter-kit@2';
     import TextAlign from 'https://esm.sh/@tiptap/extension-text-align@2';
     import Highlight from 'https://esm.sh/@tiptap/extension-highlight@2';
@@ -520,6 +651,18 @@ class InlyneEditorPanel {
     let docKey = '${key}';
     let stompClient;
     let suppress = false;
+
+    // new stuff
+    txtKey.addEventListener('input', () => {
+      vscode.postMessage({ type: 'keyChanged', key: txtKey.value });
+    });
+
+    window.addEventListener('message', e => {
+      const m = e.data;
+      if (m.type === 'externalKeyChanged') {
+        txtKey.value = m.key;
+      }
+    });
 
     const editor = new Editor({
       element: document.getElementById('editor'),
@@ -586,7 +729,8 @@ class InlyneEditorPanel {
     document.getElementById('btnLoad').onclick = async () => {
       const key = document.getElementById('txtKey').value.trim();
       if (!key) return;
-      vscode.postMessage({ type: 'loadDoc', key });
+      // tell the extension “please load this key”
+      vscode.postMessage({ type: 'loadEditorDoc', key });
     };
 
     // Menubar actions
@@ -610,10 +754,106 @@ class InlyneEditorPanel {
       });
     });
 
+  window.addEventListener('message', e => {
+      const m = e.data;
+      if (m.type === 'editorDocLoaded') {
+        // overwrite TipTap content and reconnect
+        docKey = m.key;
+        editor.commands.setContent(m.content || '<p></p>', false);
+        connect(m.key);
+        document.getElementById('status').textContent = 'Loaded ' + m.key;
+      }
+      if (m.type === 'editorDocError') {
+        document.getElementById('status').textContent = 'Error: ' + m.message;
+      }
+    });
+
     // Initial sync
     connect(docKey);
 </script>
 </body>
 </html>`;
+  }
+}
+
+class AuthPanel {
+  public static currentPanel: AuthPanel | undefined;
+  private readonly _panel: vscode.WebviewPanel;
+  private readonly _context: vscode.ExtensionContext;
+
+  private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext) {
+    this._panel = panel;
+    this._context = context;
+    panel.webview.options = { enableScripts: true };
+    panel.webview.html = AuthPanel.getHtml(panel.webview);
+
+    panel.webview.onDidReceiveMessage(async msg => {
+      if (msg.type === 'authenticate') {
+        try {
+          const res = await fetch('https://api.inlyne.link/user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'userLogin',
+              email: msg.email,
+              password: msg.password
+            })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.message||JSON.stringify(data));
+          // save token
+          await context.globalState.update('inlyneToken', data.token);
+          // notify sidebar
+          vscode.window.showInformationMessage('Signed in successfully');
+          vscode.commands.executeCommand('inlyne.refreshSidebarAuth');
+          this._panel.dispose();
+        } catch (err: any) {
+          this._panel.webview.postMessage({ type: 'authError', message: err.message });
+        }
+      }
+    });
+
+    panel.onDidDispose(() => AuthPanel.currentPanel = undefined);
+  }
+
+  public static createOrShow(context: vscode.ExtensionContext) {
+    if (AuthPanel.currentPanel) {
+      AuthPanel.currentPanel._panel.reveal();
+    } else {
+      const panel = vscode.window.createWebviewPanel(
+        'inlyneAuth',
+        'Sign in to Inlyne',
+        vscode.ViewColumn.Active,
+        { retainContextWhenHidden: false, enableScripts: true }
+      );
+      AuthPanel.currentPanel = new AuthPanel(panel, context);
+    }
+  }
+
+  private static getHtml(webview: vscode.Webview): string {
+    return /* html */`
+      <!DOCTYPE html><html><body>
+      <h2>Sign in to Inlyne</h2>
+      <form id="login">
+        <input id="email" type="email" placeholder="Email" required /><br/>
+        <input id="pwd"   type="password" placeholder="Password" required /><br/>
+        <button type="submit">Sign In</button>
+      </form>
+      <div id="error" style="color:red;"></div>
+      <script>
+        const vscode = acquireVsCodeApi();
+        document.getElementById('login').addEventListener('submit', e => {
+          e.preventDefault();
+          const email = document.getElementById('email').value;
+          const password = document.getElementById('pwd').value;
+          vscode.postMessage({ type:'authenticate', email, password });
+        });
+        window.addEventListener('message', e => {
+          if (e.data.type === 'authError') {
+            document.getElementById('error').textContent = e.data.message;
+          }
+        });
+      </script>
+      </body></html>`;
   }
 }
