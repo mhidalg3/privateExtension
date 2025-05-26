@@ -70,10 +70,13 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('inlyne.refreshSidebarAuth', () => {
-      const token = context.globalState.get<string>('inlyneToken');
+      const token    = context.globalState.get<string>('inlyneToken');
+      const username = context.globalState.get<string>('inlyneUsername') ?? 'Unknown User';
+
       InlyneSidebarProvider.currentView?.webview.postMessage({
-        type: 'authChanged',
-        token
+        type:     'authChanged',
+        token,
+        username
       });
     })
   );
@@ -150,7 +153,7 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
     private readonly extensionUri: vscode.Uri
   ) {}
 
-  resolveWebviewView(
+  async resolveWebviewView(
     view: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken
@@ -161,7 +164,13 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
     view.webview.html = this.getSidebarHtml(view.webview);
 
     const token = this.context.globalState.get<string>('inlyneToken');
-    view.webview.postMessage({ type: 'authChanged', token });
+    const username = this.context.globalState.get<string>('inlyneUsername') ?? 'Unknown User';
+
+    view.webview.postMessage({
+      type:     'authChanged',
+      token,
+      username
+    });
 
     view.webview.onDidReceiveMessage(async msg => {
       switch (msg.type) {
@@ -289,159 +298,147 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
   private getSidebarHtml(webview: vscode.Webview): string {
     const csp = `
       default-src 'none';
-      connect-src https://api.inlyne.link wss://api.inlyne.link;
-      style-src 'unsafe-inline' https:;
-      script-src 'unsafe-inline' https:;
+      style-src 'unsafe-inline';
+      script-src 'unsafe-inline';
     `;
+    return /* html */`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta http-equiv="Content-Security-Policy" content="${csp}">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <style>
+        :root {
+          --brand-ivory: #f5efe6;
+          --brand-cream: #fcf8f1;
+          --brand-olive: #708238;
+          --brand-orange: #eb7f00;
+          --brand-black: #1f1f1f;
+        }
+        * { box-sizing: border-box; }
+        body {
+          margin: 0; padding: 0;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          background: var(--brand-ivory);
+        }
+        .container {
+          padding: 12px;
+        }
+        
+        .card {
+          background: var(--brand-cream);
+          border-radius: 16px;
+          padding: 24px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          width: 100%;
+          max-width: 360px;
+          max-height: calc(100% - 24px);
+          overflow-y: auto;
 
-    return `<!DOCTYPE html>
-  <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="${csp}">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <style>
-      *, *::before, *::after { box-sizing: border-box; }
-      html, body {
-        height: 100vh;
-        margin: 0;
-        padding: 0;
-      }
-      body {
-        margin: 0;
-        padding: 0;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        font-size: 0.9rem;
-        color: #333;
-        display: flex;
-        flex-direction: column;
-      }
-      #toolbar {
-        flex: 0 0 auto;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        padding: 8px;
-        background: #fafbfc;
-        border-bottom: 1px solid #e1e4e8;
-      }
+          /* ← add this */
+          box-shadow: 0 -4px 6px rgba(0,0,0,0.1), 0 4px 6px rgba(0,0,0,0.1);
+        }
 
-      .btn {
-        width: 100%;
-        padding: 6px 0;
-        align-items: center;
-        border: none;
-        border-radius: 4px;
-        background: #fff;
-        color: #24292e;
-        font-size: 0.9rem;
-        cursor: pointer;
-        transition: background 0.2s;
-      }
-      .btn:hover { background:rgb(236,109,38); }
+        .card button {
+          width: 100%;
+          padding: 10px;
+          background: var(--brand-orange);
+          color: var(--brand-ivory);
+          border: none;
+          border-radius: 8px;
+          font-size: 14px;
+          cursor: pointer;
+        }
+        .card button:hover {
+          opacity: 0.9;
+        }
+        .form-group {
+          display: flex;
+          gap: 8px;
+        }
+        .form-group input {
+          flex: 1;
+          padding: 8px;
+          border: 2px solid var(--brand-olive);
+          border-radius: 8px;
+          background: var(--brand-ivory);
+          color: var(--brand-black);
+        }
+        .status {
+          font-size: 13px;
+          color: var(--brand-black);
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="card">
+          <!-- Sign In / Out -->
+          <button id="btnSignIn" style="display:none">Sign In</button>
+          <button id="btnSignOut">Sign Out</button>
 
-      .load-container { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; align-items: center; }
-      .load-input {
-        flex: 1;
-        padding: 6px 8px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        font-size: 0.9rem;
-      }
-      .load-input:focus {
-        outline: none;
-        border-color: rgb(236,109,38);
-        box-shadow: 0 0 0 2px rgba(184, 87, 31, 0.84);
-      }
+          <!-- New Document -->
+          <button id="btnNew">New Document</button>
 
-      #userInfo {
-        flex: 0 0 auto;
-        display: flex;
-        flex-direction: column;
-        padding: 6px 8px;
-        font-size: 0.8rem;
-        color: #586069;
-        background: #f3f3f3;
-      }
+          <!-- Load Existing -->
+          <div class="form-group">
+            <input id="txtKey" placeholder="Doc Key or URL…" />
+          </div>
 
-      #status {
-        flex: 1 1 auto;
-        min-height: 0px;
-        color: #586069;
-        background: #f3f3f3;
-        padding: 4px 8px;
-        font-size: 0.85em;
-        overflow: auto;
-      }
-      
-    </style>
-  </head>
-  <body>
-    <div id="toolbar">
-      <button id="btnSignIn"  class="btn">Sign In</button>
-      <button id="btnSignOut" class="btn" style="display:none">Sign Out</button>
-      <button id="btnNew"     class="btn">New</button>
-      <div class="load-container">
-        <input  id="txtKey"  class="load-input" placeholder="Document Key…">
-        <button id="btnLoad" class="btn" style="width:auto; padding:6px 12px;">Load</button>
+          <button id="btnLoad">Load</button>
+
+          <!-- Status Lines -->
+          <div id="userInfo" class="status">User Status: Not signed in</div>
+          <div id="status"   class="status">Doc Status: Ready</div>
+        </div>
       </div>
-    </div>
-    <div id="userInfo">User Status: Not signed in</div>
-    <div id="status">Doc Status: Ready</div>
 
-    <script>
-      const vscode = acquireVsCodeApi();
-      const docKey = document.getElementById('txtKey');
-      
-      // user types key notift the extension
-      txtKey.addEventListener('input', () => {
-        vscode.postMessage({
-          type: 'keyChanged',
-          key: txtKey.value
+      <script>
+        const vscode = acquireVsCodeApi();
+
+        // Wire up buttons
+        document.getElementById('btnSignIn').onclick  = () => vscode.postMessage({ type:'signIn' });
+        document.getElementById('btnSignOut').onclick = () => vscode.postMessage({ type:'signOut' });
+        document.getElementById('btnNew').onclick     = () => vscode.postMessage({ type:'createDoc' });
+        document.getElementById('btnLoad').onclick    = () => {
+          const key = document.getElementById('txtKey').value.trim();
+          vscode.postMessage({ type:'loadDoc', key });
+        };
+
+        // Reflect external key changes
+        document.getElementById('txtKey').addEventListener('input', () => {
+          vscode.postMessage({ type:'keyChanged', key: document.getElementById('txtKey').value });
         });
-      });
-      // reflect chhanges from popout textbox
-      window.addEventListener('message', e => {
-        const m = e.data;
-        if (m.type === 'externalKeyChanged') {
-          docKey.value = m.key;
-        }
-      });
 
-      // Handle the "Sign In" and "Sign Out" buttons
-      document.getElementById('btnSignIn').onclick  = () => vscode.postMessage({ type:'signIn' });
-      document.getElementById('btnSignOut').onclick = () => vscode.postMessage({ type:'signOut' });
-      
-      document.getElementById('btnNew').onclick     = () => vscode.postMessage({ type:'createDoc' });
-      document.getElementById('btnLoad').onclick    = () => {
-        const key = document.getElementById('txtKey').value.trim();
-        vscode.postMessage({ type:'loadDoc', key });
-      };
-
-
-      window.addEventListener('message', e => {
-        const m = e.data;
-        if (m.type === 'authChanged') {
-          const signedIn = Boolean(m.token);
-          document.getElementById('btnSignIn').style.display  = signedIn ? 'none' : 'block';
-          document.getElementById('btnSignOut').style.display = signedIn ? 'block' : 'none';
-          document.getElementById('userInfo').textContent =
-            signedIn
-              ? 'User Status: Signed in as: ' + (m.username || 'Unknown User')
-              : 'User Status: Not signed in';
-
-        }
-        if (m.type === 'docCreated') {
-          document.getElementById('status').textContent = 'Doc Status: Created ' + m.key;
-        } else if (m.type === 'docLoaded') {
-          document.getElementById('status').textContent = 'Doc Status: Loaded ' + m.key;
-        } else if (m.type === 'backendError') {
-          document.getElementById('status').textContent = 'Dos Status Error: ' + m.message;
-        }
-      });
-    </script>
-  </body>
-  </html>`;
+        // Handle messages from extension
+        window.addEventListener('message', e => {
+          const m = e.data;
+          if (m.type === 'authChanged') {
+            const signedIn = Boolean(m.token);
+            document.getElementById('btnSignIn').style.display  = signedIn ? 'none' : 'block';
+            document.getElementById('btnSignOut').style.display = signedIn ? 'block' : 'none';
+            document.getElementById('userInfo').textContent =
+              signedIn
+                ? 'User Status: Signed in as: ' + (m.username || 'Unknown User')
+                : 'User Status: Not signed in';
+          }
+          if (m.type === 'docCreated') {
+            document.getElementById('status').textContent = 'Doc Status: Created ' + m.key;
+            document.getElementById('txtKey').value      = m.key;
+          } else if (m.type === 'docLoaded') {
+            document.getElementById('status').textContent = 'Doc Status: Loaded ' + m.key;
+            document.getElementById('txtKey').value      = m.key;
+          } else if (m.type === 'backendError') {
+            document.getElementById('status').textContent = 'Error: ' + m.message;
+          }
+        });
+      </script>
+    </body>
+    </html>
+    `;
   }
 }
 
@@ -560,220 +557,218 @@ class InlyneEditorPanel {
   }
 
   private _getHtml(webview: vscode.Webview, key: string, initialContent?: string): string {
-    // reuse full sidebar HTML inside editor window
     const csp = `
       default-src 'none';
-      connect-src https://api.inlyne.link wss://api.inlyne.link;
-      style-src 'unsafe-inline' https:;
-      script-src 'unsafe-inline' https:;
+      connect-src https://api.inlyne.link wss://api.inlyne.link https://cdn.jsdelivr.net https://esm.sh;
+      style-src 'unsafe-inline';
+      script-src 'unsafe-inline' https://cdn.jsdelivr.net https://esm.sh;
     `;
     return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="${csp}">
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<style>
-  *, *::before, *::after { box-sizing: border-box; }
-  body { margin: 0; padding: 0; font-family: sans-serif; }
-
-  /* Toolbar */ 
-  #toolbar { display: flex; align-items: center; gap: 8px; padding: 8px; background: #f3f3f3; border-bottom: 1px solid #ddd; }
-  .btn { background: white; border: 1px solid #ccc; padding: 0.5rem 0.75rem; font-size: 0.9rem; cursor: pointer; transition: background 0.3s; }
-  .btn:hover { background: orange; color: white; }
-  .load-input { flex: 1; padding: 0.5rem 0.75rem; border: 1px solid #ccc; font-size: 0.9rem; transition: border-color 0.2s, box-shadow 0.2s; }
-  .load-input:focus { outline: none; border-color: orange; box-shadow: 0 0 0 2px rgba(255,165,0,0.3); }
-
-  /* Menubar (new) */
-  #menubar { padding: 4px 8px; background: #fafafa; border-bottom: 1px solid #ddd; display: flex; gap: 4px; }
-  #menubar button { background: white; border: 1px solid #ccc; padding: 0.4rem; cursor: pointer; transition: background 0.3s; }
-  #menubar button:hover { background: orange; color: white; }
-
-  .ProseMirror {
-    white-space: pre-wrap; 
-    flex: 1;
-    width: 100%;
-    height: 100%;
-    box-sizing: border-box;
-    outline: none;
-  }
-  /* Editor area */
-  #status { padding: 4px 8px; font-size: 0.85em; color: #666; }
-  #editor { 
-    margin: 0 8px; 
-    padding: 8px; 
-    min-height: calc(100vh - 160px); 
-    border: 1px solid #ccc; 
-    display: flex; 
-    flex-direction: column;
-    position: relative;
-  }
-  #editor:focus-within { border-color: orange; box-shadow: 0 0 0 2px rgba(255,165,0,0.3); }
-  
-
-  /* Responsive */
-  @media (max-width: 320px) {
-    #toolbar, #menubar { flex-direction: column; align-items: stretch; }
-    .btn, .load-input { width: 100%; margin: 0; }
-  }
-</style>
-</head>
-<body>
-  <div id="toolbar">
-    <button id="btnNew" class="btn btn-large">New</button>
-    <input id="txtKey" class="load-input" placeholder="docKey…" value="${key}">
-    <button id="btnLoad" class="btn">Load</button>
-  </div>
-  <div id="menubar">
-    <button data-action="bold"><b>B</b></button>
-    <button data-action="italic"><i>I</i></button>
-    <button data-action="heading">H1</button>
-    <button data-action="align-left">L</button>
-    <button data-action="align-center">C</button>
-    <button data-action="align-right">R</button>
-    <button data-action="highlight">🔆</button>
-    <button data-action="image">🖼️</button>
-  </div>
-  <div id="status">Editor for ${key}</div>
-  <div id="editor"></div>
-
-<script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.1.1/bundles/stomp.umd.min.js"></script>
-<script type="module">
-    import { Editor } from 'https://esm.sh/@tiptap/core@2';
-    import StarterKit from 'https://esm.sh/@tiptap/starter-kit@2';
-    import TextAlign from 'https://esm.sh/@tiptap/extension-text-align@2';
-    import Highlight from 'https://esm.sh/@tiptap/extension-highlight@2';
-    import Image from 'https://esm.sh/@tiptap/extension-image@2';
-    import Placeholder from 'https://esm.sh/@tiptap/extension-placeholder@2';
-
-    const vscode = acquireVsCodeApi();
-    let docKey = '${key}';
-    let stompClient;
-    let suppress = false;
-
-    // new stuff
-    txtKey.addEventListener('input', () => {
-      vscode.postMessage({ type: 'keyChanged', key: txtKey.value });
-    });
-
-    window.addEventListener('message', e => {
-      const m = e.data;
-      if (m.type === 'externalKeyChanged') {
-        txtKey.value = m.key;
-      }
-    });
-
-    const editor = new Editor({
-      element: document.getElementById('editor'),
-      editable: true,
-      extensions: [
-        StarterKit,
-        TextAlign.configure({ types: ['heading', 'paragraph'] }),
-        Highlight,
-        Image,
-        Placeholder.configure({ placeholder: 'Type your docs here…' }),
-      ],
-      content: ${initialContent ? JSON.stringify(initialContent) : "'<p>Edit Here!</p>'"},
-      autofocus: true,
-      onUpdate: ({ editor }) => {
-        if (suppress) return;
-        
-        const html = editor.getHTML();
-        vscode.postMessage({ type: 'contentUpdate', html });
-        
-        if (stompClient?.active) {
-          stompClient.publish({
-            destination: '/app/edit/' + docKey, 
-            body: JSON.stringify({ content: html })
-          });
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8"/>
+      <meta http-equiv="Content-Security-Policy" content="${csp}">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <style>
+        :root {
+          --brand-ivory: #f5efe6;
+          --brand-cream: #fcf8f1;
+          --brand-olive: #708238;
+          --brand-orange: #eb7f00;
+          --brand-black: #1f1f1f;
         }
-      }
-    });
+        * { box-sizing: border-box; margin:0; padding:0; }
+        body {
+          background: var(--brand-ivory);
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          height: 100vh; display: flex;
+        }
+        .container {
+          flex: 1; padding: 16px; display: flex; flex-direction: column;
+        }
+        .card {
+          background: var(--brand-cream);
+          border-radius: 16px;
+          box-shadow: 0 -4px 6px rgba(0,0,0,0.1), 0 4px 6px rgba(0,0,0,0.1);
+          flex: 1; display: flex; flex-direction: column; gap: 12px; overflow: hidden;
+        }
+        #toolbar {
+          display: flex; align-items: center; gap: 8px; padding: 12px;
+        }
+        .btn {
+          background: var(--brand-orange);
+          color: var(--brand-ivory);
+          border: none; border-radius: 8px;
+          padding: 8px 12px; cursor: pointer; font-size: 14px;
+        }
+        .btn:hover { opacity: 0.9; }
+        .load-input {
+          flex: 1; padding: 8px 12px;
+          border: 2px solid var(--brand-olive);
+          border-radius: 8px;
+          background: var(--brand-ivory);
+          color: var(--brand-black);
+          font-size: 14px;
+        }
+        #menubar {
+          display: flex; gap: 4px; padding: 0 12px 12px;
+          border-bottom: 1px solid #ddd;
+        }
+        #menubar button {
+          background: var(--brand-ivory);
+          border: 1px solid #ccc; border-radius: 4px; padding: 6px;
+          cursor: pointer;
+        }
+        #menubar button:hover {
+          background: var(--brand-orange);
+          color: var(--brand-ivory);
+        }
+        #status {
+          padding: 0 12px; font-size: 13px; color: var(--brand-black);
+        }
+        #editor {
+          flex: 1; margin: 0 12px 12px; padding: 12px;
+          border: 1px solid #ccc; border-radius: 8px;
+          overflow: auto; background: white;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="card">
+          <div id="toolbar">
+            <button id="btnNew" class="btn">New</button>
+            <input id="txtKey" class="load-input" placeholder="docKey…" value="${key}"/>
+            <button id="btnLoad" class="btn">Load</button>
+          </div>
+          <div id="menubar">
+            <button data-action="bold"><b>B</b></button>
+            <button data-action="italic"><i>I</i></button>
+            <button data-action="heading">H1</button>
+            <button data-action="align-left">L</button>
+            <button data-action="align-center">C</button>
+            <button data-action="align-right">R</button>
+            <button data-action="highlight">🔆</button>
+            <button data-action="image">🖼️</button>
+          </div>
+          <div id="status">Editor for ${key}</div>
+          <div id="editor"></div>
+        </div>
+      </div>
 
-    // Ensure editor is focusable and editable
-    setTimeout(() => {
-      editor.setEditable(true);
-      editor.commands.focus();
-    }, 100);
+      <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
+      <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.1.1/bundles/stomp.umd.min.js"></script>
+      <script type="module">
+        import { Editor } from 'https://esm.sh/@tiptap/core@2';
+        import StarterKit from 'https://esm.sh/@tiptap/starter-kit@2';
+        import TextAlign from 'https://esm.sh/@tiptap/extension-text-align@2';
+        import Highlight from 'https://esm.sh/@tiptap/extension-highlight@2';
+        import Image from 'https://esm.sh/@tiptap/extension-image@2';
+        import Placeholder from 'https://esm.sh/@tiptap/extension-placeholder@2';
 
-    function connect(key) {
-      if (stompClient) stompClient.deactivate();
-      stompClient = new StompJs.Client({ webSocketFactory: () => new SockJS('https://api.inlyne.link/ws') });
-      stompClient.onConnect = () => {
-        document.getElementById('status').textContent = '🟢 Connected to ' + key;
-        
-        stompClient.subscribe('/topic/docs/' + key, msg => {
-          const { content } = JSON.parse(msg.body);
-          if (editor.getHTML() !== content) {
-            suppress = true;
-            editor.commands.setContent(content || '<p></p>', false);
-            suppress = false;
+        const vscode = acquireVsCodeApi();
+        let docKey = '${key}';
+        let stompClient;
+        let suppress = false;
+
+        // Sync key changes
+        document.getElementById('txtKey').addEventListener('input', () =>
+          vscode.postMessage({ type: 'keyChanged', key: document.getElementById('txtKey').value })
+        );
+        window.addEventListener('message', e => {
+          if (e.data.type === 'externalKeyChanged')
+            document.getElementById('txtKey').value = e.data.key;
+        });
+
+        // Initialize TipTap editor
+        const editor = new Editor({
+          element: document.getElementById('editor'),
+          editable: true,
+          extensions: [
+            StarterKit,
+            TextAlign.configure({ types: ['heading', 'paragraph'] }),
+            Highlight,
+            Image,
+            Placeholder.configure({ placeholder: 'Type your docs here…' }),
+          ],
+          content: ${initialContent ? JSON.stringify(initialContent) : "'<p>Edit Here!</p>'"},
+          autofocus: true,
+          onUpdate: ({ editor }) => {
+            if (suppress) return;
+            const html = editor.getHTML();
+            vscode.postMessage({ type: 'contentUpdate', html });
+            if (stompClient?.active) {
+              stompClient.publish({
+                destination: '/app/edit/' + docKey,
+                body: JSON.stringify({ content: html })
+              });
+            }
           }
         });
-      };
-      
-      stompClient.onStompError = frame => {
-        console.error('STOMP error', frame.headers['message']);
-        document.getElementById('status').textContent = '🔴 Connection error';
-      };
-      
-      stompClient.activate();
-    }
+        setTimeout(() => { editor.setEditable(true); editor.commands.focus(); }, 100);
 
-    // Toolbar actions
-    document.getElementById('btnNew').onclick = () => {
-      vscode.postMessage({ type: 'createDoc' });
-    };
-
-    document.getElementById('btnLoad').onclick = async () => {
-      const key = document.getElementById('txtKey').value.trim();
-      if (!key) return;
-      // tell the extension “please load this key”
-      vscode.postMessage({ type: 'loadEditorDoc', key });
-    };
-
-    // Menubar actions
-    document.querySelectorAll('#menubar button').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const action = btn.getAttribute('data-action');
-        switch (action) {
-          case 'bold': editor.chain().focus().toggleBold().run(); break;
-          case 'italic': editor.chain().focus().toggleItalic().run(); break;
-          case 'heading': editor.chain().focus().toggleHeading({ level: 1 }).run(); break;
-          case 'align-left': editor.chain().focus().setTextAlign('left').run(); break;
-          case 'align-center': editor.chain().focus().setTextAlign('center').run(); break;
-          case 'align-right': editor.chain().focus().setTextAlign('right').run(); break;
-          case 'highlight': editor.chain().focus().toggleHighlight().run(); break;
-          case 'image': {
-            const url = prompt('Image URL');
-            if (url) editor.chain().focus().setImage({ src: url }).run();
-            break;
-          }
+        function connect(key) {
+          if (stompClient) stompClient.deactivate();
+          stompClient = new StompJs.Client({ webSocketFactory: () => new SockJS('https://api.inlyne.link/ws') });
+          stompClient.onConnect = () => {
+            document.getElementById('status').textContent = '🟢 Connected to ' + key;
+            stompClient.subscribe('/topic/docs/' + key, msg => {
+              const { content } = JSON.parse(msg.body);
+              if (editor.getHTML() !== content) {
+                suppress = true;
+                editor.commands.setContent(content || '<p></p>', false);
+                suppress = false;
+              }
+            });
+          };
+          stompClient.onStompError = frame =>
+            document.getElementById('status').textContent = '🔴 Connection error';
+          stompClient.activate();
         }
-      });
-    });
 
-  window.addEventListener('message', e => {
-      const m = e.data;
-      if (m.type === 'editorDocLoaded') {
-        // overwrite TipTap content and reconnect
-        docKey = m.key;
-        editor.commands.setContent(m.content || '<p></p>', false);
-        connect(m.key);
-        document.getElementById('status').textContent = 'Loaded ' + m.key;
-      }
-      if (m.type === 'editorDocError') {
-        document.getElementById('status').textContent = 'Error: ' + m.message;
-      }
-    });
+        // Wire up toolbar/load/new
+        document.getElementById('btnNew').onclick  = () => vscode.postMessage({ type: 'createDoc' });
+        document.getElementById('btnLoad').onclick = () => vscode.postMessage({ type: 'loadEditorDoc', key: document.getElementById('txtKey').value.trim() });
+        document.querySelectorAll('#menubar button').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const action = btn.getAttribute('data-action');
+            switch (action) {
+              case 'bold': editor.chain().focus().toggleBold().run(); break;
+              case 'italic': editor.chain().focus().toggleItalic().run(); break;
+              case 'heading': editor.chain().focus().toggleHeading({ level: 1 }).run(); break;
+              case 'align-left': editor.chain().focus().setTextAlign('left').run(); break;
+              case 'align-center': editor.chain().focus().setTextAlign('center').run(); break;
+              case 'align-right': editor.chain().focus().setTextAlign('right').run(); break;
+              case 'highlight': editor.chain().focus().toggleHighlight().run(); break;
+              case 'image': {
+                const url = prompt('Image URL');
+                if (url) editor.chain().focus().setImage({ src: url }).run();
+              }
+            }
+          });
+        });
 
-    // Initial sync
-    connect(docKey);
-</script>
-</body>
-</html>`;
+        // Handle incoming messages
+        window.addEventListener('message', e => {
+          const m = e.data;
+          if (m.type === 'editorDocLoaded') {
+            docKey = m.key;
+            editor.commands.setContent(m.content || '<p></p>', false);
+            connect(m.key);
+            document.getElementById('status').textContent = 'Loaded ' + m.key;
+          }
+          if (m.type === 'editorDocError') {
+            document.getElementById('status').textContent = 'Error: ' + m.message;
+          }
+        });
+
+        // Kick it off!
+        connect(docKey);
+      </script>
+    </body>
+    </html>`;
   }
+
 }
 
 class AuthPanel {
@@ -803,6 +798,7 @@ class AuthPanel {
           if (!res.ok) throw new Error(data.message||JSON.stringify(data));
           // save token
           await context.globalState.update('inlyneToken', data.token);
+          await context.globalState.update('inlyneUsername', data.email);
           // notify sidebar
           vscode.window.showInformationMessage('Signed in successfully');
           vscode.commands.executeCommand('inlyne.refreshSidebarAuth');
@@ -831,29 +827,117 @@ class AuthPanel {
   }
 
   private static getHtml(webview: vscode.Webview): string {
+    const csp = `
+      default-src 'none';
+      style-src 'unsafe-inline';
+      script-src 'unsafe-inline';
+    `;
     return /* html */`
-      <!DOCTYPE html><html><body>
-      <h2>Sign in to Inlyne</h2>
-      <form id="login">
-        <input id="email" type="email" placeholder="Email" required /><br/>
-        <input id="pwd"   type="password" placeholder="Password" required /><br/>
-        <button type="submit">Sign In</button>
-      </form>
-      <div id="error" style="color:red;"></div>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta http-equiv="Content-Security-Policy" content="${csp}">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <style>
+        :root {
+          --brand-ivory: #f5efe6;
+          --brand-cream: #fcf8f1;
+          --brand-olive: #708238;
+          --brand-orange: #eb7f00;
+          --brand-black: #1f1f1f;
+        }
+        * { box-sizing: border-box; }
+        body {
+          margin: 0; padding: 0;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          background: var(--brand-ivory);
+        }
+        .container {
+          min-height: 100vh;
+          display: flex; justify-content: center; align-items: center;
+          padding: 16px;
+        }
+        .card {
+          width: 100%; max-width: 400px;
+          background: var(--brand-cream);
+          border-radius: 16px; padding: 32px;
+          box-shadow: 0 -4px 6px rgba(0,0,0,0.1), 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h2 {
+          margin: 0 0 24px;
+          text-align: center;
+          color: var(--brand-black);
+        }
+        .form-group { margin-bottom: 16px; }
+        label {
+          display: block; margin-bottom: 4px;
+          font-size: 14px; font-weight: 500;
+          color: var(--brand-black);
+        }
+        input {
+          width: 100%; padding: 8px 12px;
+          font-size: 14px;
+          background: var(--brand-ivory);
+          color: var(--brand-black);
+          border: 2px solid var(--brand-olive);
+          border-radius: 8px;
+        }
+        input:focus {
+          outline: none;
+          box-shadow: 0 0 0 2px rgba(235,127,0,0.3);
+        }
+        button {
+          width: 100%; padding: 12px;
+          background: var(--brand-orange);
+          color: var(--brand-ivory);
+          font-size: 16px;
+          border: none; border-radius: 8px;
+          cursor: pointer;
+        }
+        button:hover { opacity: 0.9; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="card">
+          <h2>Sign in to Inlyne</h2>
+          <form id="login">
+            <div class="form-group">
+              <label for="email">Email</label>
+              <input id="email" type="email" placeholder="you@example.com" required />
+            </div>
+            <div class="form-group">
+              <label for="pwd">Password</label>
+              <input id="pwd" type="password" placeholder="••••••••••••" required />
+            </div>
+            <button type="submit">Login</button>
+          </form>
+        </div>
+      </div>
+
       <script>
         const vscode = acquireVsCodeApi();
+
+        // Handle form submission
         document.getElementById('login').addEventListener('submit', e => {
           e.preventDefault();
-          const email = document.getElementById('email').value;
-          const password = document.getElementById('pwd').value;
-          vscode.postMessage({ type:'authenticate', email, password });
+          vscode.postMessage({
+            type: 'authenticate',
+            email: document.getElementById('email').value,
+            password: document.getElementById('pwd').value
+          });
         });
+
+        // Display auth errors
         window.addEventListener('message', e => {
           if (e.data.type === 'authError') {
-            document.getElementById('error').textContent = e.data.message;
+            alert(e.data.message);
           }
         });
       </script>
-      </body></html>`;
+    </body>
+    </html>
+    `;
   }
 }
