@@ -96,11 +96,11 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('inlyne.refreshSidebarAuth', () => {
-      const token    = context.globalState.get<string>('inlyneToken');
+      const token = context.globalState.get<string>('inlyneToken');
       const username = context.globalState.get<string>('inlyneUsername') ?? 'Unknown User';
 
       InlyneSidebarProvider.currentView?.webview.postMessage({
-        type:     'authChanged',
+        type: 'authChanged',
         token,
         username
       });
@@ -146,8 +146,8 @@ export class InlyneLinkProvider implements vscode.DocumentLinkProvider {
 
     while ((m = this._regex.exec(text))) {
       const start = doc.positionAt(m.index);
-      const end   = doc.positionAt(m.index + m[0].length);
-      const key   = m[1];
+      const end = doc.positionAt(m.index + m[0].length);
+      const key = m[1];
 
       // build a command URI: command:inlyne.openEditorTab?["theKey"]
       const args = encodeURIComponent(JSON.stringify([key]));
@@ -193,7 +193,7 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
     const username = this.context.globalState.get<string>('inlyneUsername') ?? 'Unknown User';
 
     view.webview.postMessage({
-      type:     'authChanged',
+      type: 'authChanged',
       token,
       username
     });
@@ -259,8 +259,8 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
       const url = data.url as string;
       const key = url.split('/').pop()!;
 
-      InlyneSidebarProvider.currentDocKey     = key;
-      InlyneSidebarProvider.currentContent    = '';
+      InlyneSidebarProvider.currentDocKey = key;
+      InlyneSidebarProvider.currentContent = '';
       this._view?.webview.postMessage({ type: 'docCreated', key });
     } catch (err: any) {
       console.error(err);
@@ -316,14 +316,14 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
       const access = data.accessLevel as 'public'|'reader'|'writer';
       const doc = data.doc as { linkKey: string; content?: string; isPublic: boolean };
 
-      InlyneSidebarProvider.currentDocKey  = doc.linkKey;
+      InlyneSidebarProvider.currentDocKey = doc.linkKey;
       InlyneSidebarProvider.currentContent = (access === 'public')
         ? ''
         : (doc.content ?? '');
 
       this._view?.webview.postMessage({
-        type:    'docLoaded',
-        key:     doc.linkKey,
+        type: 'docLoaded',
+        key: doc.linkKey,
         content: InlyneSidebarProvider.currentContent
       });
 
@@ -433,7 +433,7 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
 
           <!-- Status Lines -->
           <div id="userInfo" class="status">User Status: Not signed in</div>
-          <div id="status"   class="status">Doc Status: Ready</div>
+          <div id="status" class="status">Doc Status: Ready</div>
         </div>
       </div>
 
@@ -441,10 +441,10 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
         const vscode = acquireVsCodeApi();
 
         // Wire up buttons
-        document.getElementById('btnSignIn').onclick  = () => vscode.postMessage({ type:'signIn' });
+        document.getElementById('btnSignIn').onclick = () => vscode.postMessage({ type:'signIn' });
         document.getElementById('btnSignOut').onclick = () => vscode.postMessage({ type:'signOut' });
-        document.getElementById('btnNew').onclick     = () => vscode.postMessage({ type:'createDoc' });
-        document.getElementById('btnLoad').onclick    = () => {
+        document.getElementById('btnNew').onclick = () => vscode.postMessage({ type:'createDoc' });
+        document.getElementById('btnLoad').onclick = () => {
           const key = document.getElementById('txtKey').value.trim();
           vscode.postMessage({ type:'loadDoc', key });
         };
@@ -472,10 +472,10 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
           }
           if (m.type === 'docCreated') {
             document.getElementById('status').textContent = 'Doc Status: Created ' + m.key;
-            document.getElementById('txtKey').value      = m.key;
+            document.getElementById('txtKey').value = m.key;
           } else if (m.type === 'docLoaded') {
             document.getElementById('status').textContent = 'Doc Status: Loaded ' + m.key;
-            document.getElementById('txtKey').value      = m.key;
+            document.getElementById('txtKey').value = m.key;
           } else if (m.type === 'backendError') {
             document.getElementById('status').textContent = 'Error: ' + m.message;
           }
