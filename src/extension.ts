@@ -1,3 +1,4 @@
+
 // src/extension.ts
 import * as vscode from 'vscode';
 import fetch from 'node-fetch';
@@ -30,43 +31,68 @@ export function activate(context: vscode.ExtensionContext) {
       if (!key) {
         return vscode.window.showWarningMessage('No Inlyne DocKey to open');
       }
-  
-      // fetch the latest content for that key
-      let content = InlyneSidebarProvider.currentContent;
+
+      const API = 'https://api.inlyne.link';
+      const token = context.globalState.get<string>('inlyneToken');
+      const userId = context.globalState.get<string>('inlyneUserId'); // you may need to save this on login!
+      const headers: Record<string,string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      let res, json;
       try {
-        const API = 'https://api.inlyne.link';
-        const token = context.globalState.get<string>('inlyneToken');
-        const headers: Record<string,string> = {};
-        if (token) headers['Authorization'] = `Bearer ${token}`;
+        res = await fetch(`${API}/${key}`, { method: 'GET', headers });
+        json = await res.json();
+      } catch (e) {
+        vscode.window.showErrorMessage('Network error');
+        return;
+      }
 
-        const res = await fetch(
-          // GET public or auth’d fetch:
-          `${API}/${key}`,
-          { method: 'GET', headers }
+      // Unauthorized/private doc: prompt sign-in
+      if (!res.ok || json?.responseType === "unauthorized") {
+        const go = await vscode.window.showErrorMessage(
+          '🔒 This document is private. Please sign in to access it.',
+          'Sign In'
         );
+        if (go === 'Sign In') AuthPanel.createOrShow(context);
+        return;
+      }
 
-        const json = await res.json();
-        // fetch either public (no content) or authed (json.doc.content)
-        content = json.doc?.content ?? '';
-        if (!res.ok) {
-          vscode.window.showErrorMessage(`Failed to load doc (${res.status})`);
+      // If doc is private, check permission if user is signed in
+      if (json?.doc && !json.doc.isPublic && userId && token) {
+        const permRes = await fetch(`${API}/docs`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            type: 'getUserPermissionsOnDoc',
+            docId: key,
+            userId
+          })
+        });
+        const permJson = await permRes.json();
+        const permission = permJson?.permission ?? 'none';
+        if (!['owner','admin','writer','reader'].includes(permission)) {
+          vscode.window.showErrorMessage('🚫 You do not have permission to open this private document.');
           return;
         }
-        InlyneSidebarProvider.currentContent = content;
-        InlyneSidebarProvider.currentDocKey = key;
-
-        InlyneSidebarProvider.currentView?.webview.postMessage({
-          type:    'docLoaded',
-          key,
-          content
-        });
-      } catch (e) {
-        console.error('Could not fetch Inlyne document:', e);
       }
-      
+
+      // If passed all checks, load doc content as usual
+      const content = json.doc?.content ?? '';
+      InlyneSidebarProvider.currentContent = content;
+      InlyneSidebarProvider.currentDocKey = key;
+      InlyneSidebarProvider.currentView?.webview.postMessage({
+        type: 'docLoaded',
+        key,
+        content
+      });
+
       InlyneEditorPanel.createOrShow(context.extensionUri, key, content);
     })
   );
+
 
   context.subscriptions.push(
     vscode.commands.registerCommand('inlyne.refreshSidebarAuth', () => {
@@ -191,7 +217,7 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
           return this.createDoc();
         }
         case 'loadDoc':
-          // accept either a URL or a bare key
+          // load the document with the given key
           const key = normalizeKey(msg.key.trim());
           await this.loadDoc(key);
           // open popout editor (needed?)
@@ -244,42 +270,57 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
 
   private async loadDoc(key: string) {
     const token = this.context.globalState.get<string>('inlyneToken');
+    const userId = this.context.globalState.get<string>('inlyneUserId'); // <- get this!
     const headers: Record<string,string> = {};
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
+    if (token) headers['Authorization'] = `Bearer ${token}`;
 
     try {
       const res = await fetch(`${this.API}/${key}`, { method: 'GET', headers });
       const data = await res.json();
 
-      // 1) if the server says “unauthorized”:
-      if (!res.ok) {
-        if (data.responseType === 'unauthorized') {
-          this._view?.webview.postMessage({
-            type: 'backendError',
-            message: '🔒 This document is private. Please sign in to access it.'
-          });
-        } else {
-          this._view?.webview.postMessage({
-            type: 'backendError',
-            message: data.details ?? data.message ?? `Load failed (${res.status})`
-          });
-        }
+      // Unauthorized
+      if (!res.ok || data.responseType === 'unauthorized') {
+        this._view?.webview.postMessage({
+          type: 'backendError',
+          message: '🔒 This document is private. Please sign in to access it.'
+        });
         return;
       }
 
-      // 2) on success we have an `accessLevel` field
-      const access = data.accessLevel as 'public'|'reader'|'writer';
-      const doc    = data.doc as { linkKey: string; content?: string; isPublic: boolean };
+      // Check permission if private and signed in
+      if (data?.doc && !data.doc.isPublic && userId && token) {
+        const permRes = await fetch(`${this.API}/docs`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            type: 'getUserPermissionsOnDoc',
+            docId: key,
+            userId
+          })
+        });
+        const permJson = await permRes.json();
+        const permission = permJson?.permission ?? 'none';
+        if (!['owner','admin','writer','reader'].includes(permission)) {
+          this._view?.webview.postMessage({
+            type: 'backendError',
+            message: '🚫 You do not have permission to open this private document.'
+          });
+          return;
+        }
+      }
 
-      // save what key we _actually_ opened
+      // Success: set key/content as before
+      const access = data.accessLevel as 'public'|'reader'|'writer';
+      const doc = data.doc as { linkKey: string; content?: string; isPublic: boolean };
+
       InlyneSidebarProvider.currentDocKey  = doc.linkKey;
       InlyneSidebarProvider.currentContent = (access === 'public')
-        ? ''            // public docs only return linkKey
+        ? ''
         : (doc.content ?? '');
 
-      // tell the webview “we loaded”
       this._view?.webview.postMessage({
         type:    'docLoaded',
         key:     doc.linkKey,
@@ -416,6 +457,10 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
         // Handle messages from extension
         window.addEventListener('message', e => {
           const m = e.data;
+          if (m.type === 'externalKeyChanged') {
+            // when pop-out changes reflect in sidebar
+            document.getElementById('txtKey').value = m.key;
+          }
           if (m.type === 'authChanged') {
             const signedIn = Boolean(m.token);
             document.getElementById('btnSignIn').style.display  = signedIn ? 'none' : 'block';
@@ -520,14 +565,16 @@ class InlyneEditorPanel {
           this._panel.webview.postMessage({
             type: 'editorDocLoaded',
             key: newKey,
-            content
+            content,
+            accessLevel: data.accessLevel || (data.doc?.isPublic ? 'public' : 'private')
           });
           InlyneSidebarProvider.currentDocKey  = newKey;
           InlyneSidebarProvider.currentContent = content;
           InlyneSidebarProvider.currentView?.webview.postMessage({
-            type:    'docLoaded',
-            key:     newKey,
-            content
+            type: 'docLoaded',
+            key,
+            content,
+            accessLevel: data.accessLevel || (data.doc?.isPublic ? 'public' : 'private')
           });
         } catch (err) {
           console.error('Error loading in popout:', err);
@@ -607,7 +654,7 @@ class InlyneEditorPanel {
           border: 2px solid var(--brand-olive);
           border-radius: 8px;
           background: var(--brand-ivory);
-          color: var(--brand-black);
+          color: black;
           font-size: 14px;
         }
         #menubar {
@@ -630,6 +677,7 @@ class InlyneEditorPanel {
           flex: 1; margin: 0 12px 12px; padding: 12px;
           border: 1px solid #ccc; border-radius: 8px;
           overflow: auto; background: white;
+          color: var(--brand-black);
         }
       </style>
     </head>
@@ -670,6 +718,11 @@ class InlyneEditorPanel {
         let docKey = '${key}';
         let stompClient;
         let suppress = false;
+        let currentAccessType = '';
+
+        function setStatus(main, access) {
+          document.getElementById('status').textContent = main + (access ? ' ' + access : '');
+        }
 
         // Sync key changes
         document.getElementById('txtKey').addEventListener('input', () =>
@@ -711,8 +764,8 @@ class InlyneEditorPanel {
           if (stompClient) stompClient.deactivate();
           stompClient = new StompJs.Client({ webSocketFactory: () => new SockJS('https://api.inlyne.link/ws') });
           stompClient.onConnect = () => {
-            document.getElementById('status').textContent = '🟢 Connected to ' + key;
-            stompClient.subscribe('/topic/docs/' + key, msg => {
+            setStatus('🟢 Connected to ' + docKey, currentAccessType);
+            stompClient.subscribe('/topic/docs/' + docKey, msg => {
               const { content } = JSON.parse(msg.body);
               if (editor.getHTML() !== content) {
                 suppress = true;
@@ -722,9 +775,10 @@ class InlyneEditorPanel {
             });
           };
           stompClient.onStompError = frame =>
-            document.getElementById('status').textContent = '🔴 Connection error';
+            setStatus('🔴 Connection error', '');
           stompClient.activate();
         }
+
 
         // Wire up toolbar/load/new
         document.getElementById('btnNew').onclick  = () => vscode.postMessage({ type: 'createDoc' });
@@ -755,7 +809,11 @@ class InlyneEditorPanel {
             docKey = m.key;
             editor.commands.setContent(m.content || '<p></p>', false);
             connect(m.key);
-            document.getElementById('status').textContent = 'Loaded ' + m.key;
+            let accessString = '';
+            if (m.accessLevel === 'public') accessString = '🌐 Public';
+            else if (m.accessLevel === 'private') accessString = '🔒 Private';
+            setStatus('Loaded ' + m.key, accessString);
+            currentAccessType = accessString;
           }
           if (m.type === 'editorDocError') {
             document.getElementById('status').textContent = 'Error: ' + m.message;
@@ -799,6 +857,7 @@ class AuthPanel {
           // save token
           await context.globalState.update('inlyneToken', data.token);
           await context.globalState.update('inlyneUsername', data.email);
+          await context.globalState.update('inlyneUserId', data.userId);
           // notify sidebar
           vscode.window.showInformationMessage('Signed in successfully');
           vscode.commands.executeCommand('inlyne.refreshSidebarAuth');
@@ -887,6 +946,8 @@ class AuthPanel {
           outline: none;
           box-shadow: 0 0 0 2px rgba(235,127,0,0.3);
         }
+        /* need a proseMirror? */
+
         button {
           width: 100%; padding: 12px;
           background: var(--brand-orange);
@@ -896,6 +957,7 @@ class AuthPanel {
           cursor: pointer;
         }
         button:hover { opacity: 0.9; }
+        
       </style>
     </head>
     <body>
