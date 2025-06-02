@@ -36290,6 +36290,15 @@ var Client = class {
 var import_jsx_runtime2 = __toESM(require_jsx_runtime(), 1);
 var API_BASE = "https://api.inlyne.link";
 var WS_URL = `${API_BASE}/ws`;
+var debounce = (func, waitFor) => {
+  let timeout = null;
+  return function(...args) {
+    if (timeout !== null) {
+      clearTimeout(timeout);
+    }
+    timeout = setTimeout(() => func.apply(this, args), waitFor);
+  };
+};
 var RichTextEditor = ({
   content,
   docKey,
@@ -36297,6 +36306,21 @@ var RichTextEditor = ({
 }) => {
   const stompClientRef = (0, import_react3.useRef)(null);
   const preventNextSync = (0, import_react3.useRef)(false);
+  const [connectionStatus, setConnectionStatus] = (0, import_react3.useState)("disconnected");
+  const [errorMessage, setErrorMessage] = (0, import_react3.useState)(null);
+  const debouncedPublish = (0, import_react3.useCallback)(
+    debounce((html) => {
+      if (stompClientRef.current?.active && docKey) {
+        console.log("Publishing debounced update to WebSocket");
+        stompClientRef.current.publish({
+          destination: `/app/edit/${docKey}`,
+          body: JSON.stringify({ content: html })
+        });
+      }
+    }, 750),
+    // 750ms debounce time
+    [docKey]
+  );
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -36320,27 +36344,78 @@ var RichTextEditor = ({
         return;
       }
       onChange?.(html);
-      if (stompClientRef.current?.active && docKey) {
-        stompClientRef.current.publish({
-          destination: `/app/edit/${docKey}`,
-          body: JSON.stringify({ content: html })
-        });
-      }
+      debouncedPublish(html);
     }
   });
   (0, import_react3.useEffect)(() => {
+    if (editor && content !== editor.getHTML()) {
+      console.log("Content prop changed, updating editor content");
+      console.log("New content length:", content.length, "Current editor content length:", editor.getHTML().length);
+      preventNextSync.current = true;
+      editor.commands.setContent(content);
+      setTimeout(() => {
+        editor.commands.focus("start");
+      }, 0);
+    }
+  }, [content, editor]);
+  const notifyStatusChange = (0, import_react3.useCallback)((status) => {
+    try {
+      if (window.vscode) {
+        window.vscode.postMessage({
+          type: "connectionStatusChanged",
+          status
+        });
+      }
+      try {
+        if (typeof document !== "undefined") {
+          const updateConnectionStatus = window.updateConnectionStatus;
+          if (typeof updateConnectionStatus === "function") {
+            updateConnectionStatus(status);
+          }
+        }
+      } catch (e) {
+        console.warn("Could not update status UI directly:", e);
+      }
+    } catch (e) {
+      console.warn("Error notifying status change:", e);
+    }
+  }, []);
+  (0, import_react3.useEffect)(() => {
     if (!docKey || !editor) return;
+    try {
+      if (typeof window.updateDocumentInfo === "function") {
+        window.updateDocumentInfo(docKey);
+      }
+    } catch (e) {
+      console.warn("Could not update document info:", e);
+    }
     if (stompClientRef.current) {
       stompClientRef.current.deactivate();
     }
+    setConnectionStatus("connecting");
+    notifyStatusChange("connecting");
+    setErrorMessage(null);
     const client = new Client({
       webSocketFactory: () => new import_sockjs_client.default(WS_URL),
-      reconnectDelay: 5e3,
-      heartbeatIncoming: 0,
-      heartbeatOutgoing: 2e4
+      reconnectDelay: 1e3,
+      // Reconnect faster
+      heartbeatIncoming: 4e3,
+      heartbeatOutgoing: 4e3,
+      debug: (msg) => console.debug("STOMP:", msg),
+      connectionTimeout: 1e4
     });
     client.onConnect = () => {
       console.log("Connected to WebSocket");
+      setConnectionStatus("connected");
+      notifyStatusChange("connected");
+      setErrorMessage(null);
+      try {
+        if (typeof window.showToast === "function") {
+          window.showToast("Connected to server");
+        }
+      } catch (e) {
+        console.warn("Could not show toast:", e);
+      }
       client.subscribe(`/topic/docs/${docKey}`, (message) => {
         try {
           const { content: content2 } = JSON.parse(message.body);
@@ -36350,11 +36425,26 @@ var RichTextEditor = ({
           }
         } catch (e) {
           console.error("Failed to parse WebSocket message", e);
+          setErrorMessage(`Failed to parse message: ${e instanceof Error ? e.message : String(e)}`);
         }
       });
     };
     client.onStompError = (frame) => {
       console.error("STOMP error", frame.headers.message);
+      setConnectionStatus("error");
+      notifyStatusChange("error");
+      setErrorMessage(`STOMP error: ${frame.headers.message}`);
+    };
+    client.onWebSocketClose = () => {
+      console.warn("WebSocket connection closed");
+      setConnectionStatus("disconnected");
+      notifyStatusChange("disconnected");
+    };
+    client.onWebSocketError = (event) => {
+      console.error("WebSocket error", event);
+      setConnectionStatus("error");
+      notifyStatusChange("error");
+      setErrorMessage("WebSocket connection error. Check your network connection.");
     };
     client.activate();
     stompClientRef.current = client;
@@ -36369,6 +36459,17 @@ var RichTextEditor = ({
   }
   return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "rich-text-editor", children: [
     /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(MenuBar, { editor }),
+    connectionStatus === "error" && errorMessage && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "connection-error", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { children: errorMessage }),
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { onClick: () => {
+        if (stompClientRef.current) {
+          stompClientRef.current.deactivate();
+          stompClientRef.current.activate();
+          setConnectionStatus("connecting");
+        }
+      }, children: "Reconnect" })
+    ] }),
+    connectionStatus === "connecting" && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "connection-status", children: "Connecting to server..." }),
     /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(EditorContent, { editor, className: "editor-content" })
   ] });
 };
@@ -36379,57 +36480,58 @@ var import_jsx_runtime3 = __toESM(require_jsx_runtime(), 1);
 if (typeof window !== "undefined" && typeof window.global === "undefined") {
   window.global = window;
 }
-try {
-  console.log("Editor initializing...");
-  const vscode = window.acquireVsCodeApi();
-  const initialContent = window.__INITIAL_CONTENT__ || "";
-  const initialKey = window.__INITIAL_DOCKEY__ || "";
-  console.log("Editor initialized with key:", initialKey, "content length:", initialContent.length);
-  window.addEventListener("DOMContentLoaded", () => {
-    console.log("DOM fully loaded");
-    try {
-      const container = document.getElementById("root");
-      if (!container) {
-        throw new Error("Root container not found in DOM");
-      }
-      console.log("Root container found, creating React root");
-      const root = (0, import_client.createRoot)(container);
-      const errorContainer = document.getElementById("error-container");
-      if (errorContainer) {
-        errorContainer.style.display = "none";
-      }
-      console.log("About to render RichTextEditor component");
-      try {
-        root.render(
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(React4.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
-            RichTextEditor_default,
-            {
-              content: initialContent,
-              docKey: initialKey,
-              onChange: (html) => {
-                console.log("Content changed, length:", html.length);
-                vscode.postMessage({ type: "contentUpdate", docKey: initialKey, content: html });
-              }
-            }
-          ) })
-        );
-        console.log("RichTextEditor component rendered successfully");
-      } catch (error) {
-        console.error("Error rendering React component:", error);
-        const errorContainer2 = document.getElementById("error-container");
-        if (errorContainer2) {
-          errorContainer2.style.display = "block";
-          errorContainer2.innerHTML = "<h3>React Render Error</h3><p>" + (error instanceof Error ? error.message : String(error)) + "</p>";
+function App() {
+  const [content, setContent2] = React4.useState(window.__INITIAL_CONTENT__ || "");
+  const [docKey, setDocKey] = React4.useState(window.__INITIAL_DOCKEY__ || "");
+  React4.useEffect(() => {
+    function onMessage(event) {
+      const msg = event.data;
+      if (msg.type === "editorDocLoaded") {
+        console.log("Editor received editorDocLoaded message:", msg);
+        if (typeof msg.key === "string") {
+          console.log("Updating docKey to:", msg.key);
+          setDocKey(msg.key);
+        }
+        if (typeof msg.content === "string") {
+          console.log("Updating content, length:", msg.content.length);
+          setContent2(msg.content);
         }
       }
-    } catch (error) {
-      console.error("DOM Error:", error);
-      const errorContainer = document.getElementById("error-container");
-      if (errorContainer) {
-        errorContainer.style.display = "block";
-        errorContainer.innerHTML = "<h3>DOM Error</h3><p>" + (error instanceof Error ? error.message : String(error)) + "</p>";
-      }
     }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+    RichTextEditor_default,
+    {
+      content,
+      docKey,
+      onChange: (html) => {
+        const vscode = window.vscode;
+        if (vscode) {
+          vscode.postMessage({
+            type: "contentUpdate",
+            docKey,
+            content: html
+          });
+        }
+      }
+    },
+    docKey
+  );
+}
+try {
+  console.log("Editor initializing...");
+  window.addEventListener("DOMContentLoaded", () => {
+    const container = document.getElementById("root");
+    if (!container) {
+      console.error("Root container not found in DOM");
+      return;
+    }
+    console.log("Root container found, creating React root");
+    const root = (0, import_client.createRoot)(container);
+    root.render(/* @__PURE__ */ (0, import_jsx_runtime3.jsx)(App, {}));
+    console.log("RichTextEditor (App) rendered successfully");
   });
 } catch (error) {
   console.error("Global initialization error:", error);

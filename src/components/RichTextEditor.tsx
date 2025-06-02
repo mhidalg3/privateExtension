@@ -93,14 +93,32 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
       debouncedPublish(html);
     },
   });
+  
+  // Update editor content when the content prop changes
+  useEffect(() => {
+    if (editor && content !== editor.getHTML()) {
+      console.log('Content prop changed, updating editor content');
+      console.log('New content length:', content.length, 'Current editor content length:', editor.getHTML().length);
+      
+      // Set flag to prevent echo back to server
+      preventNextSync.current = true;
+      
+      // Update the editor with new content
+      editor.commands.setContent(content);
+      
+      // Ensure the cursor is at the beginning after content change
+      setTimeout(() => {
+        editor.commands.focus('start');
+      }, 0);
+    }
+  }, [content, editor]);
 
   // Notify parent VSCode for status updates
   const notifyStatusChange = useCallback((status: string) => {
     try {
-      // Check if we're in a VSCode environment
-      const vscode = (window as any).acquireVsCodeApi?.();
-      if (vscode) {
-        vscode.postMessage({
+      // Use the global vscode instance instead of calling acquireVsCodeApi again
+      if ((window as any).vscode) {
+        (window as any).vscode.postMessage({
           type: 'connectionStatusChanged',
           status
         });
@@ -145,12 +163,14 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
     notifyStatusChange('connecting');
     setErrorMessage(null);
 
-    // Create new STOMP client  
+    // Create new STOMP client with better reconnection settings
     const client = new Client({
       webSocketFactory: () => new SockJS(WS_URL),
-      reconnectDelay: 5000,
-      heartbeatIncoming: 0,
-      heartbeatOutgoing: 20000,
+      reconnectDelay: 1000, // Reconnect faster
+      heartbeatIncoming: 4000,
+      heartbeatOutgoing: 4000,
+      debug: msg => console.debug('STOMP:', msg),
+      connectionTimeout: 10000
     });
 
     // Configure WebSocket handlers

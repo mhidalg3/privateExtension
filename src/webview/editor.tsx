@@ -18,71 +18,68 @@ declare global {
   }
 }
 
+// APP
+function App() {
+  const [content, setContent] = React.useState<string>(window.__INITIAL_CONTENT__ || '');
+  const [docKey, setDocKey]     = React.useState<string>(window.__INITIAL_DOCKEY__ || '');
+
+  React.useEffect(() => {
+    // Use the VS Code API that was already acquired in the HTML template
+    // instead of calling acquireVsCodeApi() again
+    function onMessage(event: MessageEvent) {
+      const msg = event.data;
+      if (msg.type === 'editorDocLoaded') {
+        console.log('Editor received editorDocLoaded message:', msg);
+        if (typeof msg.key === 'string') {
+          console.log('Updating docKey to:', msg.key);
+          setDocKey(msg.key);
+        }
+        if (typeof msg.content === 'string') {
+          // Ensure content is updated when a new document is loaded
+          console.log('Updating content, length:', msg.content.length);
+          setContent(msg.content);
+        }
+      }
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  return (
+    <RichTextEditor
+      key={docKey}
+      content={content}
+      docKey={docKey}
+      onChange={(html: string) => {
+        // Don't call acquireVsCodeApi again, use the vscode instance
+        // that was already created in the HTML template
+        const vscode = (window as any).vscode;
+        if (vscode) {
+          vscode.postMessage({
+            type: 'contentUpdate',
+            docKey,
+            content: html
+          });
+        }
+      }}
+    />
+  );
+}
+
 // Add error tracking
 try {
   console.log('Editor initializing...');
-  
-  const vscode = window.acquireVsCodeApi(); 
-  // Type may be refined, but `any` is fine here.
-
-  const initialContent = window.__INITIAL_CONTENT__ || '';
-  const initialKey     = window.__INITIAL_DOCKEY__   || '';
-  
-  console.log('Editor initialized with key:', initialKey, 'content length:', initialContent.length);
-
-  // Wait for DOM to be ready
   window.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM fully loaded');
-    try {
-      const container = document.getElementById('root');
-      if (!container) {
-        throw new Error('Root container not found in DOM');
-      }
-      console.log('Root container found, creating React root');
-      const root = createRoot(container);
-      
-      // If there's an error container, hide it once React renders successfully
-      const errorContainer = document.getElementById('error-container');
-      if (errorContainer) {
-        errorContainer.style.display = 'none';
-      }
-
-      console.log('About to render RichTextEditor component');
-      
-      try {
-        root.render(
-          <React.StrictMode>
-            <RichTextEditor
-              content={initialContent}
-              docKey={initialKey}
-              onChange={(html: string) => {
-                console.log('Content changed, length:', html.length);
-                vscode.postMessage({ type: 'contentUpdate', docKey: initialKey, content: html });
-              }}
-            />
-          </React.StrictMode>
-        );
-        console.log('RichTextEditor component rendered successfully');
-      } catch (error) {
-        console.error('Error rendering React component:', error);
-        const errorContainer = document.getElementById('error-container');
-        if (errorContainer) {
-          errorContainer.style.display = 'block';
-          errorContainer.innerHTML = '<h3>React Render Error</h3><p>' + 
-            (error instanceof Error ? error.message : String(error)) + '</p>';
-        }
-      }
-    } catch (error) {
-      console.error('DOM Error:', error);
-      const errorContainer = document.getElementById('error-container');
-      if (errorContainer) {
-        errorContainer.style.display = 'block';
-        errorContainer.innerHTML = '<h3>DOM Error</h3><p>' + 
-          (error instanceof Error ? error.message : String(error)) + '</p>';
-      }
+    const container = document.getElementById('root');
+    if (!container) {
+      console.error('Root container not found in DOM');
+      return;
     }
+    console.log('Root container found, creating React root');
+    const root = createRoot(container);
+    root.render(<App />);
+    console.log('RichTextEditor (App) rendered successfully');
   });
 } catch (error) {
   console.error('Global initialization error:', error);
-  // We can't access the DOM yet for error container, so just log it
 }

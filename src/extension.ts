@@ -122,10 +122,8 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
+  // Just dispose the current panel if it exists, but don't close all editors
   InlyneEditorPanel.currentPanel?.dispose();
-  vscode.commands.executeCommand('workbench.action.closeAllEditors').then(() => {
-    vscode.commands.executeCommand('workbench.action.closeAllGroups');
-  });
 }
 
 
@@ -234,6 +232,11 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
         case 'loadDoc':
           const key = normalizeKey(msg.key.trim());
           await this.loadDoc(key);
+          // If the editor panel exists, just update it with the new content
+          if (InlyneEditorPanel.currentPanel) {
+            InlyneEditorPanel.currentPanel.update(key, InlyneSidebarProvider.currentContent);
+          }
+          // Open the document in a new tab or update existing one
           await vscode.commands.executeCommand('inlyne.openEditorTab', key);
           break;
         case 'keyChanged':
@@ -361,7 +364,7 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
       <meta http-equiv="Content-Security-Policy" content="${csp}">
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <style>
-        body {
+        body {f
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
           padding: 0;
           margin: 0;
@@ -695,11 +698,18 @@ class InlyneEditorPanel {
 
   public update(key: string, content: string) {
     this._docKey = key;
+    
+    // Update the panel title to reflect the new document
+    this._panel.title = `Inlyne: ${key}`;
+    
+    // First notify the webview about the document change
     this._panel.webview.postMessage({
       type: 'editorDocLoaded',
       key,
       content
     });
+    
+    console.log(`Updated editor panel with key: ${key}, content length: ${content.length}`);
   }
 
   public static createOrShow(
@@ -718,7 +728,13 @@ class InlyneEditorPanel {
     if (InlyneEditorPanel.currentPanel) {
       console.log('Reusing existing editor panel');
       InlyneEditorPanel.currentPanel._panel.reveal(column);
+      
+      // Always update the panel with the latest content and title
       InlyneEditorPanel.currentPanel.update(key, initialContent ?? '');
+      
+      // No need to force refresh the HTML here as the update method should handle 
+      // sending the correct messages to the webview to update content
+      
       return;
     } else {
       console.log('Creating new editor panel');
@@ -858,7 +874,7 @@ class InlyneEditorPanel {
   public dispose() {
     InlyneEditorPanel.currentPanel = undefined;
     this._panel.dispose();
-    vscode.commands.executeCommand('workbench.action.closeEditorsInGroup');
+    // Don't close all editors in the group, let VS Code handle the panel lifecycle
   }
 
   private _getHtml(webview: vscode.Webview, key: string, initialContent?: string): string {
@@ -1005,7 +1021,11 @@ class InlyneEditorPanel {
     <body>
       <div id="error-container"></div>
       <div id="loading">Loading editor...</div>
-
+      <div id="toolbar">
+        <button id="btnNew" class="btn">New</button>
+        <input id="txtKey" class="load-input" placeholder="docKey…" value="${key}"/>
+        <button id="btnLoad" class="btn">Load</button>
+      </div>
       <div id="root"></div>
       <div id="debug"></div>
       <div class="status-bar">
@@ -1018,113 +1038,148 @@ class InlyneEditorPanel {
       <div id="toast-container"></div>
       
       <script>
-        // Debug helper
-        function debugLog(message) {
-          console.log(message);
-          const debug = document.getElementById('debug');
-          if (debug) {
-            const time = new Date().toLocaleTimeString();
-            debug.innerHTML += '<div>' + time + ' - ' + message + '</div>';
-            debug.style.display = 'block';
-          }
-        }
-        
-        // Global error handling
-        const errorContainer = document.getElementById('error-container');
-        
-        window.onerror = function(message, source, lineno, colno, error) {
-          console.error('Script error:', message, source, lineno, error);
-          errorContainer.style.display = 'block';
-          errorContainer.innerHTML = '<h3>Error Loading Editor</h3><p>' + 
-            message + '</p><p>Source: ' + source + ' Line: ' + lineno + '</p>';
-          
-          debugLog('Error: ' + message + ' at ' + source + ':' + lineno);
-          return true;
-        };
+        window.__INITIAL_CONTENT__ = ${initContent};
+        window.__INITIAL_DOCKEY__   = ${initKey};
+        window.addEventListener('DOMContentLoaded', () => {
+          // inject API - store globally to avoid calling acquireVsCodeApi() multiple times
+          window.vscode = acquireVsCodeApi();
 
-        // PROVIDE NODE.JS COMPATIBILITY LAYER - necessary for dependencies
-        debugLog('Setting up Node.js compatibility shims');
-        
-        // Define 'global' if it's not already defined - many libraries expect this
-        window.global = window;
-        
-        // Define Node.js process object
-        window.process = window.process || {
-          env: { NODE_ENV: 'production' },
-          browser: true,
-          version: '',
-          versions: { node: '' }
-        };
-        
+          // Debug helper
+          function debugLog(message) {
+            console.log(message);
+            const debug = document.getElementById('debug');
+            if (debug) {
+              const time = new Date().toLocaleTimeString();
+              debug.innerHTML += '<div>' + time + ' - ' + message + '</div>';
+              debug.style.display = 'block';
+            }
+          }
+          
+          // Global error handling
+          const errorContainer = document.getElementById('error-container');
+          
+          window.onerror = function(message, source, lineno, colno, error) {
+            console.error('Script error:', message, source, lineno, error);
+            errorContainer.style.display = 'block';
+            errorContainer.innerHTML = '<h3>Error Loading Editor</h3><p>' + 
+              message + '</p><p>Source: ' + source + ' Line: ' + lineno + '</p>';
+            
+            debugLog('Error: ' + message + ' at ' + source + ':' + lineno);
+            return true;
+          };
 
-        // Status management functions
-        function updateConnectionStatus(status) {
-          const indicator = document.getElementById('connection-indicator');
-          const statusText = document.getElementById('connection-status-text');
-          const docInfo = document.getElementById('document-info');
+          // PROVIDE NODE.JS COMPATIBILITY LAYER - necessary for dependencies
+          debugLog('Setting up Node.js compatibility shims');
           
-          indicator.className = 'status-indicator';
+          // Define 'global' if it's not already defined - many libraries expect this
+          window.global = window;
           
-          switch(status) {
-            case 'connected':
-              indicator.classList.add('status-connected');
-              statusText.textContent = 'Connected';
-              break;
-            case 'connecting':
-              indicator.classList.add('status-connecting');
-              statusText.textContent = 'Connecting...';
-              break;
-            case 'disconnected':
-              indicator.classList.add('status-disconnected');
-              statusText.textContent = 'Disconnected';
-              break;
-            case 'error':
-              indicator.classList.add('status-disconnected');
-              statusText.textContent = 'Connection Error';
-              break;
+          // Define Node.js process object
+          window.process = window.process || {
+            env: { NODE_ENV: 'production' },
+            browser: true,
+            version: '',
+            versions: { node: '' }
+          };
+          
+          // Toolbar Load and New buttons
+          document.getElementById('btnNew').addEventListener('click', () => {
+            // We reuse the same createDoc logic that lives in the sidebar
+            window.vscode.postMessage({ type: 'createDoc' });
+          });
+
+          document.getElementById('btnLoad').addEventListener('click', () => {
+            const key = document.getElementById('txtKey').value.trim();
+            if (key) {
+              window.vscode.postMessage({ type: 'loadEditorDoc', key });
+            } else {
+              showToast('Please enter a document key');
+              // window.vscode.postMessage({ type: 'showError', message: 'Please enter a document key.' });
+            }
+          });
+
+          // Listen to key changes from the sidebar
+          window.addEventListener('message', (e) => {
+            const m = e.data;
+            if (m.type === 'externalKeyChanged') {
+              document.getElementById('txtKey').value = m.key;
+              document.getElementById('document-info').textContent = 'Document: ' + m.key;
+            }
+            if (m.type === 'editorDocLoaded') {
+              // Once the editor has actually loaded a doc, update the status bar
+              document.getElementById('document-info').textContent = 'Document: ' + m.key;
+            }
+          });
+
+          // Status management functions
+          function updateConnectionStatus(status) {
+            const indicator = document.getElementById('connection-indicator');
+            const statusText = document.getElementById('connection-status-text');
+            const docInfo = document.getElementById('document-info');
+            
+            indicator.className = 'status-indicator';
+            
+            switch(status) {
+              case 'connected':
+                indicator.classList.add('status-connected');
+                statusText.textContent = 'Connected';
+                break;
+              case 'connecting':
+                indicator.classList.add('status-connecting');
+                statusText.textContent = 'Connecting...';
+                break;
+              case 'disconnected':
+                indicator.classList.add('status-disconnected');
+                statusText.textContent = 'Disconnected';
+                break;
+              case 'error':
+                indicator.classList.add('status-disconnected');
+                statusText.textContent = 'Connection Error';
+                break;
+            }
           }
-        }
-        
-        function updateDocumentInfo(docKey) {
-          const docInfo = document.getElementById('document-info');
-          if (docKey) {
-            docInfo.textContent = 'Document: ' + docKey;
-          } else {
-            docInfo.textContent = 'No document loaded';
-          }
-        }
-        
-        function showToast(message, duration = 3000) {
-          const container = document.getElementById('toast-container');
-          const toast = document.createElement('div');
-          toast.className = 'toast';
-          toast.textContent = message;
-          container.appendChild(toast);
           
-          setTimeout(() => {
-            toast.remove();
-          }, duration);
-        }
-        
-        // Buffer is often needed by Node.js libraries
-        window.Buffer = window.Buffer || {
-          isBuffer: function() { return false; }
-        };
-        
-        debugLog('Node.js compatibility layer initialized');
-        
-        try {
-          debugLog('Setting up initial content and docKey');
-          window.__INITIAL_CONTENT__ = ${initContent};
-          window.__INITIAL_DOCKEY__   = ${initKey};
-          debugLog('Key: ' + ${initKey} + ', Content length: ' + 
-            (${initContent} ? ${initContent}.length : 0));
-        } catch (e) {
-          console.error('Error setting initial content', e);
-          errorContainer.style.display = 'block';
-          errorContainer.innerHTML = '<h3>Error Setting Initial Content</h3><p>' + e.message + '</p>';
-          debugLog('Error setting initial content: ' + e.message);
-        }
+          function updateDocumentInfo(docKey) {
+            const docInfo = document.getElementById('document-info');
+            if (docKey) {
+              docInfo.textContent = 'Document: ' + docKey;
+            } else {
+              docInfo.textContent = 'No document loaded';
+            }
+          }
+          
+          function showToast(message, duration = 3000) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+              toast.remove();
+            }, duration);
+          }
+          
+          // Buffer is often needed by Node.js libraries
+          window.Buffer = window.Buffer || {
+            isBuffer: function() { return false; }
+          };
+          
+          debugLog('Node.js compatibility layer initialized');
+          
+          try {
+            debugLog('Setting up initial content and docKey');
+            window.__INITIAL_CONTENT__ = ${initContent};
+            window.__INITIAL_DOCKEY__   = ${initKey};
+            debugLog('Key: ' + ${initKey} + ', Content length: ' + 
+              (${initContent} ? ${initContent}.length : 0));
+          } catch (e) {
+            console.error('Error setting initial content', e);
+            errorContainer.style.display = 'block';
+            errorContainer.innerHTML = '<h3>Error Setting Initial Content</h3><p>' + e.message + '</p>';
+            debugLog('Error setting initial content: ' + e.message);
+          }
+      });
       </script>
       
       <!-- Load the editor script with Node.js compatibility shims already in place -->
