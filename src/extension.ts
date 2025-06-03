@@ -360,6 +360,7 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
       style-src 'unsafe-inline';
       script-src 'unsafe-inline' ${webview.cspSource};
       connect-src https://api.inlyne.link;
+      img-src ${webview.cspSource} data: https:;
     `;
     return `<!DOCTYPE html>
     <html lang="en">
@@ -368,12 +369,12 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
       <meta http-equiv="Content-Security-Policy" content="${csp}">
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <style>
-        body {f
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        body {
+          font-family: Helvetica, Arial, sans-serif;
           padding: 0;
           margin: 0;
-          color: var(--vscode-foreground);
-          background-color: var(--vscode-editor-background);
+          color: #171717;
+          background-color: #f4f4f7;
           display: flex;
           flex-direction: column;
           height: 100vh;
@@ -390,18 +391,20 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
         h2 {
           margin: 0 0 8px 0;
           font-size: 1.2em;
+          color: #EC6D26;
         }
         button, input {
-          background-color: var(--vscode-button-background);
-          color: var(--vscode-button-foreground);
+          background-color: #EC6D26;
+          color: white;
           border: none;
           padding: 6px 12px;
-          border-radius: 2px;
+          border-radius: 4px;
           cursor: pointer;
           margin: 4px 0;
+          font-family: inherit;
         }
         button:hover {
-          background-color: var(--vscode-button-hoverBackground);
+          background-color: #cf5f1e;
         }
         button:disabled {
           opacity: 0.5;
@@ -413,11 +416,14 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
           margin-bottom: 16px;
         }
         #document-form input {
-          background-color: var(--vscode-input-background);
-          color: var(--vscode-input-foreground);
+          background-color: white;
+          color: #171717;
           margin-bottom: 8px;
           width: 100%;
           box-sizing: border-box;
+          padding: 6px 10px;
+          border: 1px solid #ccc;
+          border-radius: 4px;
         }
         #document-form button {
           align-self: flex-start;
@@ -429,7 +435,7 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
         .status {
           margin-top: auto;
           padding-top: 8px;
-          border-top: 1px solid var(--vscode-panel-border);
+          border-top: 1px solid #ccc;
           font-size: 0.9em;
           display: flex;
           flex-direction: column;
@@ -440,13 +446,13 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
         .help-text {
           margin: 10px 0;
           padding: 8px;
-          background-color: var(--vscode-editorInfo-background, rgba(0,127,255,0.1));
-          border-left: 3px solid var(--vscode-infoForeground, #3794ff);
+          background-color: #fff7f0;
+          border-left: 3px solid #EC6D26;
           font-size: 0.9em;
         }
         .error-container {
-          background-color: var(--vscode-errorForeground, #f48771);
-          color: var(--vscode-foreground);
+          background-color: #fdd;
+          color: #a00;
           padding: 10px;
           border-radius: 3px;
           margin: 10px 0;
@@ -458,15 +464,16 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
           text-align: center;
         }
         .document-card {
-          background-color: var(--vscode-editor-background);
-          border: 1px solid var(--vscode-panel-border);
-          border-radius: 3px;
+          background-color: white;
+          border: 1px solid #ccc;
+          border-radius: 4px;
           padding: 10px;
           margin-bottom: 10px;
           cursor: pointer;
+          transition: background-color 0.2s ease;
         }
         .document-card:hover {
-          background-color: var(--vscode-list-hoverBackground);
+          background-color: #f0f0f0;
         }
         .document-card h3 {
           margin: 0 0 5px 0;
@@ -474,14 +481,14 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
         }
         .document-card .meta {
           font-size: 0.85em;
-          color: var(--vscode-descriptionForeground);
+          color: #555;
         }
       </style>
     </head>
     <body>
       <div id="container">
         <header>
-          <h2>Inlyne Documentation</h2>
+          <img src="${webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'inlyne_logo.png'))}" style="margin-bottom: 8px;" />
         </header>
         
         <div id="document-form">
