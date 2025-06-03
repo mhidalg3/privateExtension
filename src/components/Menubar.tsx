@@ -1,34 +1,48 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Editor } from '@tiptap/react';
+import { ReactNode } from 'react';
+import {
+  FaHeading, FaBold, FaItalic, FaStrikethrough,
+  FaAlignLeft, FaAlignCenter, FaAlignRight,
+  FaListUl, FaListOl, FaHighlighter, FaTint, FaImage
+} from 'react-icons/fa';
 
 interface MenuBarProps {
   editor: Editor | null;
 }
 
 // A small utility to toggle boolean state on click
-function ToggleButton({
+function IconButton({
   onClick,
   pressed,
+  icon,
   label,
 }: {
   onClick: () => void;
   pressed: boolean;
-  label: string;
+  icon: ReactNode;
+  label?: string; // optional tooltip
 }) {
   return (
     <button
       onClick={onClick}
+      title={label}
       style={{
-        padding: '4px 8px',
+        padding: '6px',
         marginRight: '4px',
         background: pressed ? '#ddd' : 'transparent',
-        border: '1px solid #ccc',
-        borderRadius: '4px',
+        border: 'none',
+        borderRadius: '6px',
         cursor: 'pointer',
-        fontSize: '0.9rem',
+        fontSize: '1rem',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '32px',
+        height: '32px',
       }}
     >
-      {label}
+      {icon}
     </button>
   );
 }
@@ -52,20 +66,47 @@ export default function MenuBar({ editor }: MenuBarProps) {
 
   // Keep the input in sync when cursor moves
   const syncSize = () => {
-    const cls = editor.getAttributes('textStyle').class as string | undefined;
-    setInputSize(cls?.replace(/^fs-/, '') ?? '');
+    const attrs = editor.getAttributes('textStyle');
+    if (attrs?.fontSize) {
+      setInputSize(attrs.fontSize.replace('px', ''));
+    } else {
+      const selection = window.getSelection();
+      const element = selection?.anchorNode?.parentElement;
+      if (element) {
+        const computed = getComputedStyle(element).fontSize;
+        setInputSize(computed.replace('px', ''));
+      }
+    }
   };
 
-  // Apply the chosen font size
+
+  // Apply font size using `fontSize` in style
   const applySize = () => {
     let size = inputSize.trim();
     if (!size) return;
     if (/^\d+(\.\d+)?$/.test(size)) {
       size = `${size}px`;
     }
-    editor.chain().focus().setMark('textStyle', { class: `fs-${size}` }).run();
+
+    // Apply to current selection
+    editor.chain().focus().setMark('textStyle', { fontSize: size }).run();
+
+    // Force re-setting the stored style by re-applying at the selection
+    // so it doesn't get cleared on next input
+    const { state, view } = editor;
+    const { from, to, empty } = state.selection;
+
+    if (empty) {
+      // This persists style for new input
+      const transaction = state.tr.setStoredMarks([
+        editor.schema.marks.textStyle.create({ fontSize: size }),
+      ]);
+      view.dispatch(transaction);
+    }
+
     syncSize();
   };
+
 
   // Apply the chosen color
   const applyColor = () => {
@@ -91,62 +132,78 @@ export default function MenuBar({ editor }: MenuBarProps) {
   }, [editor]);
 
   // Define the basic formatting options
-  const Options: {
-    label: string;
-    onClick: () => void;
-    pressed: boolean;
-  }[] = [
+  const Options = [
     {
-      label: 'H1',
+      icon: <span style={{ fontSize: '0.9em' }}>H₁</span>,
       onClick: () => editor.chain().focus().toggleHeading({ level: 1 }).run(),
       pressed: editor.isActive('heading', { level: 1 }),
+      label: 'Heading 1',
     },
     {
-      label: 'H2',
+      icon: <span style={{ fontSize: '0.9em' }}>H₂</span>,
       onClick: () => editor.chain().focus().toggleHeading({ level: 2 }).run(),
       pressed: editor.isActive('heading', { level: 2 }),
+      label: 'Heading 2',
     },
     {
-      label: 'B',
+      icon: <span style={{ fontSize: '0.9em' }}>H₃</span>,
+      onClick: () => editor.chain().focus().toggleHeading({ level: 3 }).run(),
+      pressed: editor.isActive('heading', { level: 3 }),
+      label: 'Heading 3',
+    },
+    {
+      icon: <FaBold />,
       onClick: () => editor.chain().focus().toggleBold().run(),
       pressed: editor.isActive('bold'),
+      label: 'Bold',
     },
     {
-      label: 'I',
+      icon: <FaItalic />,
       onClick: () => editor.chain().focus().toggleItalic().run(),
       pressed: editor.isActive('italic'),
+      label: 'Italic',
     },
     {
-      label: 'UL',
-      onClick: () => editor.chain().focus().toggleBulletList().run(),
-      pressed: editor.isActive('bulletList'),
+      icon: <FaStrikethrough />,
+      onClick: () => editor.chain().focus().toggleStrike().run(),
+      pressed: editor.isActive('strike'),
+      label: 'Strikethrough',
     },
     {
-      label: 'OL',
-      onClick: () => editor.chain().focus().toggleOrderedList().run(),
-      pressed: editor.isActive('orderedList'),
-    },
-    {
-      label: 'HL',
-      onClick: () => editor.chain().focus().toggleHighlight().run(),
-      pressed: editor.isActive('highlight'),
-    },
-    {
-      label: 'Align L',
+      icon: <FaAlignLeft />,
       onClick: () => editor.chain().focus().setTextAlign('left').run(),
       pressed: editor.isActive({ textAlign: 'left' }),
+      label: 'Align Left',
     },
     {
-      label: 'Align C',
+      icon: <FaAlignCenter />,
       onClick: () => editor.chain().focus().setTextAlign('center').run(),
       pressed: editor.isActive({ textAlign: 'center' }),
+      label: 'Align Center',
     },
     {
-      label: 'Align R',
+      icon: <FaAlignRight />,
       onClick: () => editor.chain().focus().setTextAlign('right').run(),
       pressed: editor.isActive({ textAlign: 'right' }),
+      label: 'Align Right',
+    },
+    {
+      icon: <FaListUl />,
+      onClick: () => editor.chain().focus().toggleBulletList().run(),
+      pressed: editor.isActive('bulletList'),
+      label: 'Bullet List',
+    },
+    {
+      icon: <FaListOl />,
+      onClick: () => editor.chain().focus().toggleOrderedList().run(),
+      pressed: editor.isActive('orderedList'),
+      label: 'Ordered List',
     },
   ];
+
+  const applyFontSize = (size: string) => {
+    editor.chain().focus().setMark('textStyle', { fontSize: size }).run();
+  };
 
   return (
     <div
@@ -159,77 +216,54 @@ export default function MenuBar({ editor }: MenuBarProps) {
       }}
     >
       {/* Font-Size Dropdown */}
-      <div style={{ position: 'relative', marginRight: '8px' }}>
-        <input
-          ref={inputRef}
-          value={inputSize}
-          onChange={e => setInputSize(e.target.value)}
-          onFocus={() => setDropdownOpen(true)}
-          onBlur={() => setTimeout(() => setDropdownOpen(false), 150)}
-          onKeyDown={e => e.key === 'Enter' && applySize()}
-          placeholder="Font size"
+      <div style={{ marginRight: '8px' }}>
+        <select
+          onChange={e => applyFontSize(e.target.value)}
+          defaultValue=""
           style={{
-            width: '60px',
             padding: '4px',
-            fontSize: '0.9rem',
             border: '1px solid #ccc',
             borderRadius: '4px',
+            fontSize: '0.9rem',
           }}
-        />
-        {dropdownOpen && (
-          <ul
-            style={{
-              position: 'absolute',
-              top: '100%',
-              left: 0,
-              marginTop: '4px',
-              width: '60px',
-              maxHeight: '120px',
-              overflow: 'auto',
-              background: '#fff',
-              border: '1px solid #ccc',
-              borderRadius: '4px',
-              zIndex: 10,
-            }}
-          >
-            {PRESET_SIZES.map(sz => (
-              <li
-                key={sz}
-                onMouseDown={e => {
-                  e.preventDefault();
-                  setInputSize(sz);
-                  applySize();
-                }}
-                style={{
-                  padding: '4px 6px',
-                  cursor: 'pointer',
-                  fontSize: '0.9rem',
-                }}
-              >
-                {sz}
-              </li>
-            ))}
-          </ul>
-        )}
+        >
+          <option value="" disabled>Font Size</option>
+          {PRESET_SIZES.map(size => (
+            <option key={size} value={size}>
+              {size}
+            </option>
+          ))}
+        </select>
       </div>
 
+
       {/* Formatting Toggles */}
-      {Options.map((option, index) => (
-        <ToggleButton
-          key={index}
-          pressed={option.pressed}
-          onClick={option.onClick}
-          label={option.label}
+      {Options.map((opt, idx) => (
+        <IconButton
+          key={idx}
+          icon={opt.icon}
+          onClick={opt.onClick}
+          pressed={opt.pressed}
+          label={opt.label}
         />
       ))}
 
+      <IconButton
+        icon={<FaHighlighter />}
+        onClick={() => editor.chain().focus().toggleHighlight().run()}
+        pressed={editor.isActive('highlight')}
+        label="Highlight"
+      />
+
       {/* Color Picker */}
       <div style={{ position: 'relative', marginLeft: '8px' }}>
-        <ToggleButton
+        <IconButton
+          icon={<FaTint />}
           pressed={colorOpen}
           onClick={() => setColorOpen(o => !o)}
-          label="Color"
+          label="Text Color"
         />
+
         {colorOpen && (
           <input
             type="color"
@@ -252,10 +286,11 @@ export default function MenuBar({ editor }: MenuBarProps) {
 
       {/* Image URL */}
       <div style={{ position: 'relative', marginLeft: '8px' }}>
-        <ToggleButton
+        <IconButton
+          icon={<FaImage />}
           pressed={imageOpen}
           onClick={() => setImageOpen(o => !o)}
-          label="Image"
+          label="Insert Image"
         />
         {imageOpen && (
           <input

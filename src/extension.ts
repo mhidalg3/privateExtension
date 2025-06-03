@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 
-
-=======
->>>>>>> origin/Manuel
 // src/extension.ts
 import * as vscode from 'vscode';
 import fetch from 'node-fetch';
@@ -85,15 +81,17 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       const content = json.doc?.content ?? '';
+      const accessLevel = json.accessLevel || (json.doc?.isPublic ? 'public' : 'private');
       InlyneSidebarProvider.currentContent = content;
       InlyneSidebarProvider.currentDocKey = key;
       InlyneSidebarProvider.currentView?.webview.postMessage({
         type: 'docLoaded',
         key,
-        content
+        content,
+        accessLevel
       });
 
-      InlyneEditorPanel.createOrShow(context.extensionUri, key, content);
+      InlyneEditorPanel.createOrShow(context, context.extensionUri, key, content);
     })
   );
 
@@ -213,7 +211,7 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
         view.webview.postMessage({
           type: 'docLoaded',
           key: InlyneSidebarProvider.currentDocKey,
-          content: InlyneSidebarProvider.currentContent
+          content: InlyneSidebarProvider.currentContent,
         });
       }
     }, 500);
@@ -343,7 +341,8 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
       this._view?.webview.postMessage({
         type: 'docLoaded',
         key: doc.linkKey,
-        content: InlyneSidebarProvider.currentContent
+        content: InlyneSidebarProvider.currentContent,
+        accessLevel: data.accessLevel || (data.doc?.isPublic ? 'public' : 'private')
       });
 
     } catch (err: any) {
@@ -703,21 +702,29 @@ class InlyneEditorPanel {
 
   public update(key: string, content: string) {
     this._docKey = key;
-    
+    const data = { doc: { isPublic: true }, accessLevel: 'public' }; 
+
     // Update the panel title to reflect the new document
     this._panel.title = `Inlyne: ${key}`;
     
+    this._panel.webview.postMessage({
+      type: 'externalKeyChanged',
+      key
+    });
+
     // First notify the webview about the document change
     this._panel.webview.postMessage({
       type: 'editorDocLoaded',
       key,
-      content
+      content,
+      accessLevel: data.accessLevel || (data.doc?.isPublic ? 'public' : 'private')
     });
     
     console.log(`Updated editor panel with key: ${key}, content length: ${content.length}`);
   }
 
   public static createOrShow(
+    context: vscode.ExtensionContext,
     extensionUri: vscode.Uri,
     key: string | null,
     initialContent?: string
@@ -758,7 +765,8 @@ class InlyneEditorPanel {
           panel,
           extensionUri,
           key,
-          initialContent
+          initialContent,
+          context
         );
       } catch (error) {
         console.error('Error creating editor panel:', error);
@@ -771,7 +779,8 @@ class InlyneEditorPanel {
     private readonly _panel: vscode.WebviewPanel,
     private readonly _extensionUri: vscode.Uri,
     private _docKey: string,
-    private readonly _initialContent?: string
+    private readonly _initialContent: string = ' ',
+    private readonly _context: vscode.ExtensionContext
   ) {
     console.log('Initializing editor panel with docKey:', _docKey);
     
@@ -805,7 +814,13 @@ class InlyneEditorPanel {
             const raw = msg.key.trim();
             const key = normalizeKey(raw);
             try {
-              const res = await fetch(`${this.API}/${key}`);
+              const token = this._context.globalState.get<string>('inlyneToken');
+              const headers: Record<string, string> = {};
+              if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+              }
+
+              const res = await fetch(`${this.API}/${key}`, { headers });
               const data = await res.json();
               const newKey = data.doc?.linkKey || key;
               const content = data.doc?.content ?? '';
@@ -1104,7 +1119,7 @@ class InlyneEditorPanel {
           });
 
           // Listen to key changes from the sidebar
-          window.addEventListener('message', (e) => {
+           window.addEventListener('message', (e) => {
             const m = e.data;
             if (m.type === 'externalKeyChanged') {
               document.getElementById('txtKey').value = m.key;

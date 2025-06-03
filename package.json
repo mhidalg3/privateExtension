@@ -82,10 +82,16 @@
   "dependencies": {
     "@stomp/stompjs": "^7.1.1",
     "@tiptap/core": "^2.12.0",
+    "@tiptap/extension-bold": "^2.12.0",
+    "@tiptap/extension-bullet-list": "^2.12.0",
     "@tiptap/extension-color": "^2.12.0",
+    "@tiptap/extension-heading": "^2.12.0",
     "@tiptap/extension-highlight": "^2.12.0",
     "@tiptap/extension-image": "^2.12.0",
+    "@tiptap/extension-italic": "^2.12.0",
+    "@tiptap/extension-ordered-list": "^2.12.0",
     "@tiptap/extension-placeholder": "^2.12.0",
+    "@tiptap/extension-strike": "^2.12.0",
     "@tiptap/extension-text-align": "^2.12.0",
     "@tiptap/extension-text-style": "^2.12.0",
     "@tiptap/react": "^2.12.0",
@@ -93,6 +99,7 @@
     "node-fetch": "^2.7.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-icons": "^5.5.0",
     "sockjs-client": "^1.6.1"
   },
   "devDependencies": {

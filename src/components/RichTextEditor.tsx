@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useEditor, EditorContent, Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import TextStyleBase from '@tiptap/extension-text-style';
+import TextStyle from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import TextAlign from '@tiptap/extension-text-align';
 import Highlight from '@tiptap/extension-highlight';
@@ -67,7 +67,22 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
       TextAlign.configure({
         types: ['heading', 'paragraph'],
       }),
-      TextStyleBase,
+      TextStyle.extend({
+        addAttributes() {
+          return {
+            fontSize: {
+              default: null,
+              parseHTML: element => element.style.fontSize || null,
+              renderHTML: attributes => {
+                if (!attributes.fontSize) return {};
+                return {
+                  style: `font-size: ${attributes.fontSize}`,
+                };
+              },
+            },
+          };
+        },
+      }),
       Color,
       Highlight,
       Image,
