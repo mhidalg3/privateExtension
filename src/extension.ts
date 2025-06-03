@@ -235,12 +235,22 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
         case 'loadDoc':
           const key = normalizeKey(msg.key.trim());
           await this.loadDoc(key);
-          // If the editor panel exists, just update it with the new content
+
           if (InlyneEditorPanel.currentPanel) {
-            InlyneEditorPanel.currentPanel.update(key, InlyneSidebarProvider.currentContent);
+            // If the pop‐out editor is already open simply refresh its content
+            InlyneEditorPanel.currentPanel.update(
+              key,
+              InlyneSidebarProvider.currentContent
+            );
+          } else {
+            // Otherwise create the editor panel using the content we just loaded
+            InlyneEditorPanel.createOrShow(
+              this.context,
+              this.extensionUri,
+              key,
+              InlyneSidebarProvider.currentContent
+            );
           }
-          // Open the document in a new tab or update existing one
-          await vscode.commands.executeCommand('inlyne.openEditorTab', key);
           break;
         case 'keyChanged':
           InlyneSidebarProvider.currentDocKey = msg.key;
