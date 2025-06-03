@@ -1,20 +1,23 @@
 {
 	"compilerOptions": {
-		"module": "Node16",
 		"target": "ES2022",
+		"module": "ESNext",
 		"outDir": "out",
 		"lib": [
-			"ES2022"
+			"ES2022",
+			"DOM"
 		],
-		"sourceMap": true,
+		"jsx": "react-jsx",
 		"rootDir": "src",
+		"skipLibCheck": true,
+		"sourceMap": true,
 		"strict": true,   /* enable all strict type-checking options */
 		"esModuleInterop": true,
-		"module": "Node16",
-    	"moduleResolution": "Node16"
+    	"moduleResolution": "node"
 		/* Additional Checks */
 		// "noImplicitReturns": true, /* Report error when not all code paths in function return a value. */
 		// "noFallthroughCasesInSwitch": true, /* Report errors for fallthrough cases in switch statement. */
 		// "noUnusedParameters": true,  /* Report errors on unused parameters. */
-	}
+	},
+	"include": ["src"],
 }

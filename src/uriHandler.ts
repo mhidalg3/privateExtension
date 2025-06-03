@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { InlyneSidebarProvider } from './extension';
+import { InlyneSidebarProvider } from './extension.js';
 
 export class InlyneUriHandler implements vscode.UriHandler {
   constructor(private readonly context: vscode.ExtensionContext) {}
