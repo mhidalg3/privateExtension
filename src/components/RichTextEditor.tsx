@@ -8,6 +8,9 @@ import Highlight from '@tiptap/extension-highlight';
 import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
 import MenuBar from './Menubar';  // Make sure this exactly matches the case of the file
+import './editor-styles.css'; // Import theme-aware editor styles
+import ThemeTester from './ThemeTester'; // Import the theme tester component
+import { isDarkTheme as checkIsDarkTheme, getThemeTextColor } from './ThemeColorUtils'; // Import theme utilities
 
 import SockJS from 'sockjs-client';
 import { Client, IMessage, Frame } from '@stomp/stompjs';
@@ -45,6 +48,11 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
   const preventNextSync = useRef<boolean>(false);
   const [connectionStatus, setConnectionStatus] = useState<string>('disconnected');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isDarkTheme, setIsDarkTheme] = useState<boolean>(
+    document.body.classList.contains('vscode-dark')
+  );
+  // State for theme tester visibility (for testing color handling)
+  const [showThemeTester, setShowThemeTester] = useState<boolean>(false);
 
   // Create debounced version of content update function
   const debouncedPublish = useCallback(
@@ -127,6 +135,111 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
       }, 0);
     }
   }, [content, editor]);
+  
+  // Listen for VS Code theme changes with enhanced detection using our utility functions
+  useEffect(() => {
+    // Enhanced theme change handler
+    const handleThemeChange = (e: any) => {
+      // Get theme from event, utility function, or fallback to body class
+      const isDark = e.detail?.isDarkTheme !== undefined 
+        ? e.detail.isDarkTheme 
+        : checkIsDarkTheme();
+      
+      setIsDarkTheme(isDark);
+      console.log('Theme changed:', isDark ? 'dark' : 'light');
+      
+      // Update document body classes to match
+      document.body.classList.toggle('vscode-dark', isDark);
+      document.body.classList.toggle('vscode-light', !isDark);
+      
+      // Apply theme-specific classes to editor container
+      const editorContainer = document.querySelector('.ProseMirror')?.parentElement;
+      if (editorContainer) {
+        editorContainer.classList.toggle('vscode-dark-editor', isDark);
+        editorContainer.classList.toggle('vscode-light-editor', !isDark);
+        
+        // Set the theme foreground color as a CSS variable for easy reference
+        (editorContainer as HTMLElement).style.setProperty(
+          '--theme-foreground-color', 
+          getThemeTextColor()
+        );
+      }
+      
+      // Apply theme-specific classes to the editor content
+      const editorContent = document.querySelector('.ProseMirror') as HTMLElement | null;
+      if (editorContent) {
+        editorContent.classList.toggle('vscode-dark', isDark);
+        editorContent.classList.toggle('vscode-light', !isDark);
+        
+        // Force re-render of text colors by temporarily modifying and restoring a property
+        const originalDisplay = editorContent.style.display;
+        editorContent.style.display = 'none';
+        setTimeout(() => {
+          editorContent.style.display = originalDisplay;
+        }, 10);
+      }
+      
+      // Notify parent window about theme change if needed
+      try {
+        if ((window as any).vscode) {
+          (window as any).vscode.postMessage({
+            type: 'themeChanged',
+            isDarkTheme: isDark
+          });
+        }
+      } catch (e) {
+        console.warn('Could not notify parent window about theme change:', e);
+      }
+    };
+    
+    // Check for theme on mount - first from localStorage, then from document
+    let isDark = false;
+    try {
+      // Try to get saved theme preference
+      const savedTheme = localStorage.getItem('vscode-theme');
+      if (savedTheme === 'dark' || savedTheme === 'light') {
+        isDark = savedTheme === 'dark';
+      } else {
+        // Default to document detection
+        isDark = document.body.classList.contains('vscode-dark');
+      }
+    } catch (e) {
+      // Fallback to document detection
+      isDark = document.body.classList.contains('vscode-dark');
+    }
+    
+    // Initialize theme
+    handleThemeChange({ detail: { isDarkTheme: isDark }});
+    
+    // Listen for custom theme change events
+    const rootElement = document.getElementById('root');
+    if (rootElement) {
+      rootElement.addEventListener('vscode-theme-changed', handleThemeChange);
+    }
+    
+    // Additionally listen for VS Code theme changes via class changes on body
+    const bodyObserver = new MutationObserver((mutations) => {
+      mutations.forEach(mutation => {
+        if (mutation.attributeName === 'class') {
+          const isDark = document.body.classList.contains('vscode-dark');
+          handleThemeChange({ detail: { isDarkTheme: isDark }});
+        }
+      });
+    });
+    
+    bodyObserver.observe(document.body, {
+      attributes: true,
+      attributeFilter: ['class']
+    });
+    
+    // Cleanup
+    return () => {
+      if (rootElement) {
+        rootElement.removeEventListener('vscode-theme-changed', handleThemeChange);
+      }
+      bodyObserver.disconnect();
+    };
+  }, []);
 
   // Notify parent VSCode for status updates
   const notifyStatusChange = useCallback((status: string) => {
@@ -258,8 +371,27 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
   }
 
   return (
-    <div className="rich-text-editor">
-      <MenuBar editor={editor} />
+    <div className={`rich-text-editor ${isDarkTheme ? 'vscode-dark' : 'vscode-light'}`}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <MenuBar editor={editor} isDarkTheme={isDarkTheme} />
+        <button 
+          onClick={() => setShowThemeTester(prev => !prev)} 
+          title="Test Theme Colors"
+          style={{
+            background: '#EC6D26',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            padding: '4px 8px',
+            marginRight: '10px',
+            fontSize: '12px',
+            cursor: 'pointer'
+          }}
+        >
+          {showThemeTester ? 'Hide Theme Tester' : 'Test Theme Colors'}
+        </button>
+      </div>
+      
       {connectionStatus === 'error' && errorMessage && (
         <div className="connection-error">
           <p>{errorMessage}</p>
@@ -278,6 +410,14 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
         <div className="connection-status">Connecting to server...</div>
       )}
       <EditorContent editor={editor} className="editor-content" />
+      
+      {/* Theme Tester component for verifying color handling */}
+      <ThemeTester 
+        isDarkTheme={isDarkTheme} 
+        onToggleTheme={() => setIsDarkTheme(prev => !prev)} 
+        show={showThemeTester}
+        onRequestClose={() => setShowThemeTester(false)}
+      />
     </div>
   );
 };
@@ -294,7 +434,10 @@ const styles = `
 .editor-content {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem;
+  padding: 1rem 2rem; /* Moderate horizontal padding for balanced spacing */
+  border: 1px solid #EC6D26; /* Adding orange border to match the styling */
+  border-radius: 4px; /* Rounded corners for a nicer look */
+  margin: 0 1rem 1rem 1rem; /* Add margin around the editor content */
 }
 
 .connection-error {

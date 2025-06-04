@@ -495,7 +495,7 @@ export class InlyneSidebarProvider implements vscode.WebviewViewProvider {
           <input type="text" id="doc-key" placeholder="Enter document key" />
           <div style="display: flex; gap: 8px;">
             <button id="load-doc">Load Document</button>
-            <button id="create-doc">Create New Document</button>
+            <button id="create-doc">New Document</button>
           </div>
         </div>
 
@@ -945,6 +945,8 @@ class InlyneEditorPanel {
           display: flex;
           flex-direction: column;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+          background-color: var(--vscode-editor-background);
+          color: var(--vscode-editor-foreground);
         }
         #error-container {
           display: none;
@@ -962,10 +964,23 @@ class InlyneEditorPanel {
         }
         #root {
           flex: 1;
-          width: 100%;
-          height: calc(100vh - 40px);
+          width: calc(100% - 30px); /* Account for horizontal margins (15px on each side) */
+          height: calc(100vh - 95px); /* Adjusted to leave space for status bar and toolbar */
           overflow: auto;
           position: relative;
+          padding: 10px; /* Uniform padding to prevent horizontal overflow */
+          box-sizing: border-box;
+          border: 1px solid #EC6D26;
+          margin: 0 15px 15px 15px;
+          border-radius: 5px;
+          background-color: rgb(248, 248, 249); /* Light background matching design specs */
+          color: var(--vscode-editor-foreground, #333333);
+        }
+        
+        /* Theme-specific root styles */
+        .vscode-dark #root {
+          background-color: var(--vscode-editor-background, #1e1e1e);
+          color: var(--vscode-editor-foreground, #e0e0e0);
         }
         #debug {
           font-family: monospace;
@@ -980,12 +995,14 @@ class InlyneEditorPanel {
           bottom: 0;
           left: 0;
           right: 0;
-          padding: 5px 10px;
+          height: 22px;
+          padding: 5px 15px;
           background-color: var(--vscode-statusBar-background, #007acc);
           color: var(--vscode-statusBar-foreground, white);
           font-size: 12px;
           display: flex;
           justify-content: space-between;
+          align-items: center;
           z-index: 1000;
           box-shadow: 0 -1px 3px rgba(0,0,0,0.1);
         }
@@ -1030,7 +1047,13 @@ class InlyneEditorPanel {
           to { opacity: 0; }
         }
         #toolbar {
-          display: flex; align-items: center; gap: 8px; padding: 12px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 12px;
+          width: calc(100% - 30px); /* Match root width */
+          margin: 0 15px;
+          box-sizing: border-box;
         }
         #toolbar .btn {
           border: none; border-radius: 8px;
@@ -1039,9 +1062,53 @@ class InlyneEditorPanel {
         .btn:hover { opacity: 0.9; }
         .load-input {
           flex: 1; padding: 8px 12px;
-          widht: 200px; border: 1px solid #ccc;
+          width: 200px; border: 1px solid #ccc;
           border-radius: 8px;
           font-size: 14px;
+        }
+        
+        /* Color handling for rich text editor */
+        /* Preserve explicitly set colors */
+        #root [style*="color:"] {
+          color: inherit !important;
+        }
+        
+        /* Handle black text specially in dark mode */
+        .vscode-dark #root [style*="color: rgb(0, 0, 0)"],
+        .vscode-dark #root [style*="color:rgb(0,0,0)"],
+        .vscode-dark #root [style*="color: black"],
+        .vscode-dark #root [style*="color:black"] {
+          color: var(--vscode-editor-foreground, #e0e0e0) !important;
+        }
+        
+        /* Handle white text specially in light mode */
+        .vscode-light #root [style*="color: rgb(255, 255, 255)"],
+        .vscode-light #root [style*="color:rgb(255,255,255)"],
+        .vscode-light #root [style*="color: white"],
+        .vscode-light #root [style*="color:white"] {
+          color: var(--vscode-editor-foreground, #333333) !important;
+        }
+        
+        /* Always preserve bright, specific colors */
+        #root [style*="color: rgb(255, 0, 0)"], 
+        #root [style*="color:rgb(255,0,0)"], 
+        #root [style*="color: red"], 
+        #root [style*="color:red"] {
+          color: red !important;
+        }
+        
+        #root [style*="color: rgb(0, 128, 0)"], 
+        #root [style*="color:rgb(0,128,0)"], 
+        #root [style*="color: green"], 
+        #root [style*="color:green"] {
+          color: green !important;
+        }
+        
+        #root [style*="color: rgb(0, 0, 255)"], 
+        #root [style*="color:rgb(0,0,255)"], 
+        #root [style*="color: blue"], 
+        #root [style*="color:blue"] {
+          color: blue !important;
         }
       </style>
     </head>
@@ -1054,7 +1121,6 @@ class InlyneEditorPanel {
         <button id="btnLoad" class="btn">Load</button>
       </div>
       <div id="root"></div>
-      <div id="debug"></div>
       <div class="status-bar">
         <div class="connection-status">
           <div class="status-indicator status-disconnected" id="connection-indicator"></div>
@@ -1070,6 +1136,94 @@ class InlyneEditorPanel {
         window.addEventListener('DOMContentLoaded', () => {
           // inject API - store globally to avoid calling acquireVsCodeApi() multiple times
           window.vscode = acquireVsCodeApi();
+          
+          // Detect VSCode theme and apply appropriate class to the body
+          function detectTheme() {
+            const computedStyle = getComputedStyle(document.body);
+            const backgroundColor = computedStyle.getPropertyValue('--vscode-editor-background').trim();
+            const foregroundColor = computedStyle.getPropertyValue('--vscode-editor-foreground').trim();
+            
+            // Enhanced theme detection logic
+            let isDark = false;
+            
+            // First method: Check VS Code's theme-specific class (most reliable)
+            if (document.body.classList.contains('vscode-dark') || 
+                document.body.classList.contains('vs-dark')) {
+                isDark = true;
+            }
+            // Second method: Check VS Code theme variable 'vscode-theme-kind'
+            else if (computedStyle.getPropertyValue('--vscode-theme-kind').includes('dark')) {
+                isDark = true;
+            }
+            // Third method: Check background color value for common dark themes
+            else if (backgroundColor && (
+                backgroundColor.includes('rgb(30, 30, 30)') || 
+                backgroundColor.includes('#1e1e1e') ||
+                backgroundColor.includes('rgb(32, 32, 32)') ||
+                backgroundColor.includes('#202020')
+            )) {
+                isDark = true;
+            }
+            // Fourth method: Calculate contrast ratio between bg and fg
+            else if (backgroundColor && foregroundColor) {
+                // Parse RGB values for background
+                const bgMatch = backgroundColor.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/);
+                if (bgMatch) {
+                    const [_, r, g, b] = bgMatch.map(n => parseInt(n));
+                    // Calculate perceived brightness (ITU-R BT.709)
+                    const brightness = (r * 0.2126 + g * 0.7152 + b * 0.0722);
+                    // If brightness is low, it's likely dark mode
+                    isDark = brightness < 128;
+                }
+            }
+            
+            // Apply appropriate classes to body
+            document.body.classList.toggle('vscode-dark', isDark);
+            document.body.classList.toggle('vscode-light', !isDark);
+            console.log('Theme detected:', isDark ? 'dark' : 'light');
+            
+            // Store the theme in local storage for persistence
+            try {
+              localStorage.setItem('vscode-theme', isDark ? 'dark' : 'light');
+            } catch (e) {
+              console.warn('Could not save theme preference to localStorage');
+            }
+          }
+          
+          // Detect theme on load
+          detectTheme();
+          
+          // Re-detect theme on any relevant changes with improved observer
+          const observer = new MutationObserver((mutations) => {
+            // Only proceed if we have class or style changes that might affect theming
+            const relevantMutation = mutations.some(mutation => 
+              mutation.attributeName === 'class' || 
+              mutation.attributeName === 'style'
+            );
+            
+            if (relevantMutation) {
+              // Detect theme using our enhanced function
+              detectTheme();
+              
+              // Get updated theme state
+              const isDark = document.body.classList.contains('vscode-dark');
+              
+              // Send theme info to the editor component via custom event
+              const rootElement = document.getElementById('root');
+              if (rootElement) {
+                console.log('Dispatching theme change event:', isDark ? 'dark' : 'light');
+                const event = new CustomEvent('vscode-theme-changed', { 
+                  detail: { isDarkTheme: isDark }
+                });
+                rootElement.dispatchEvent(event);
+              }
+            }
+          });
+          
+          observer.observe(document.documentElement, { 
+            attributes: true,
+            attributeFilter: ['style', 'class']
+          });
 
           // Debug helper
           function debugLog(message) {

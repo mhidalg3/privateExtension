@@ -1,0 +1,135 @@
+/* Theme-aware styles for the rich text editor */
+
+/**
+ * Enhanced editor styles with proper theme awareness
+ * These styles ensure proper text color display in both light and dark themes
+ */
+
+/* Base editor styles with theme awareness */
+.ProseMirror {
+  color: var(--vscode-editor-foreground, #333333);
+  background-color: transparent;
+}
+
+/* Theme-specific text handling */
+.vscode-dark .ProseMirror {
+  color: var(--vscode-editor-foreground, #e0e0e0);
+}
+
+/**
+ * Color handling for specific text colors
+ * This ensures proper adaptation to light and dark themes
+ */
+
+/* By default, show colored text as is */
+[style*="color:"] {
+  color: inherit !important;
+}
+
+/* 
+ * BLACK TEXT HANDLING IN DARK MODE
+ * Detect all variations of black color and adapt to dark theme
+ * This converts black text to the editor's foreground color in dark mode
+ */
+.vscode-dark [style*="color: rgb(0, 0, 0)"],
+.vscode-dark [style*="color:rgb(0,0,0)"],
+.vscode-dark [style*="color:#000"],
+.vscode-dark [style*="color: #000"],
+.vscode-dark [style*="color:#000000"],
+.vscode-dark [style*="color: #000000"],
+.vscode-dark [style*="color: black"],
+.vscode-dark [style*="color:black"] {
+  color: var(--vscode-editor-foreground, #e0e0e0) !important;
+}
+
+/* 
+ * WHITE TEXT HANDLING IN LIGHT MODE
+ * Detect all variations of white color and adapt to light theme
+ * This converts white text to the editor's foreground color in light mode
+ */
+.vscode-light [style*="color: rgb(255, 255, 255)"],
+.vscode-light [style*="color:rgb(255,255,255)"],
+.vscode-light [style*="color:#fff"],
+.vscode-light [style*="color: #fff"],
+.vscode-light [style*="color:#ffffff"],
+.vscode-light [style*="color: #ffffff"],
+.vscode-light [style*="color: white"],
+.vscode-light [style*="color:white"] {
+  color: var(--vscode-editor-foreground, #333333) !important;
+}
+
+/**
+ * PRESERVE SPECIFIC COLORS
+ * These colors should look the same in both themes
+ * Making them more vibrant than the defaults to ensure visibility
+ */
+
+/* Red variants */
+[style*="color: rgb(255, 0, 0)"], [style*="color:rgb(255,0,0)"], 
+[style*="color: red"], [style*="color:red"],
+[style*="color:#ff0000"], [style*="color: #ff0000"],
+[style*="color:#f00"], [style*="color: #f00"] { 
+  color: #ff3333 !important; 
+}
+
+/* Green variants */
+[style*="color: rgb(0, 128, 0)"], [style*="color:rgb(0,128,0)"], 
+[style*="color: green"], [style*="color:green"],
+[style*="color:#008000"], [style*="color: #008000"] { 
+  color: #33cc33 !important; 
+}
+
+/* Blue variants */
+[style*="color: rgb(0, 0, 255)"], [style*="color:rgb(0,0,255)"], 
+[style*="color: blue"], [style*="color:blue"],
+[style*="color:#0000ff"], [style*="color: #0000ff"],
+[style*="color:#00f"], [style*="color: #00f"] { 
+  color: #4d4dff !important; 
+}
+
+/* Orange variants */
+[style*="color: rgb(255, 165, 0)"], [style*="color:rgb(255,165,0)"], 
+[style*="color: orange"], [style*="color:orange"],
+[style*="color:#ffa500"], [style*="color: #ffa500"] { 
+  color: #ffa500 !important; 
+}
+
+/* Additional common colors that should be preserved */
+[style*="color: purple"], [style*="color:purple"] { color: #b366ff !important; }
+[style*="color: magenta"], [style*="color:magenta"] { color: #ff66ff !important; }
+[style*="color: cyan"], [style*="color:cyan"] { color: #33ccff !important; }
+[style*="color: yellow"], [style*="color:yellow"] { color: #ffff33 !important; }
+
+/**
+ * BACKGROUND COLOR HANDLING
+ * These rules ensure background colors are appropriate in both themes
+ */
+
+/* Handle background colors in dark theme */
+.vscode-dark [style*="background-color: white"],
+.vscode-dark [style*="background-color:#fff"],
+.vscode-dark [style*="background-color: #fff"],
+.vscode-dark [style*="background-color:#ffffff"],
+.vscode-dark [style*="background-color: #ffffff"] {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+/* Handle background colors in light theme */
+.vscode-light [style*="background-color: black"],
+.vscode-light [style*="background-color:#000"],
+.vscode-light [style*="background-color: #000"],
+.vscode-light [style*="background-color:#000000"],
+.vscode-light [style*="background-color: #000000"] {
+  background-color: rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Enhance contrast for specific background colors in dark theme */
+.vscode-dark [style*="background-color: yellow"],
+.vscode-dark [style*="background-color: lightyellow"] {
+  color: #000000 !important;
+}
+
+/* Add focused element styles for better visibility */
+.ProseMirror *:focus {
+  outline: 2px solid var(--vscode-focusBorder, #EC6D26) !important;
+}

@@ -9,6 +9,7 @@ import {
 
 interface MenuBarProps {
   editor: Editor | null;
+  isDarkTheme?: boolean; // Optional prop to handle dark theme
 }
 
 // A small utility to toggle boolean state on click
@@ -108,9 +109,12 @@ export default function MenuBar({ editor }: MenuBarProps) {
   };
 
 
-  // Apply the chosen color
+  // Apply the chosen color with theme awareness
   const applyColor = () => {
+    // Apply the color directly - our CSS will handle theme-specific rendering
     editor.chain().focus().setMark('textStyle', { color: colorValue }).run();
+    
+    // Close color picker
     setColorOpen(false);
   };
 
@@ -255,7 +259,7 @@ export default function MenuBar({ editor }: MenuBarProps) {
         label="Highlight"
       />
 
-      {/* Color Picker */}
+      {/* Enhanced Color Picker */}
       <div style={{ position: 'relative', marginLeft: '8px' }}>
         <IconButton
           icon={<FaTint />}
@@ -265,22 +269,68 @@ export default function MenuBar({ editor }: MenuBarProps) {
         />
 
         {colorOpen && (
-          <input
-            type="color"
-            value={colorValue}
-            onChange={e => setColorValue(e.target.value)}
-            onBlur={applyColor}
-            style={{
-              position: 'absolute',
-              top: '100%',
-              left: 0,
-              marginTop: '4px',
-              width: '32px',
-              height: '32px',
-              border: 'none',
-              padding: 0,
-            }}
-          />
+          <div style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            marginTop: '4px',
+            padding: '8px',
+            backgroundColor: 'var(--vscode-editor-background, #ffffff)',
+            border: '1px solid var(--vscode-button-border, #ccc)',
+            borderRadius: '4px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            zIndex: 1000,
+          }}>
+            <input
+              type="color"
+              value={colorValue}
+              onChange={e => setColorValue(e.target.value)}
+              style={{
+                width: '32px',
+                height: '32px',
+                border: 'none',
+                padding: 0,
+                display: 'block',
+                marginBottom: '8px'
+              }}
+            />
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', width: '112px' }}>
+              {['#000000', '#ffffff', '#ff0000', '#00ff00', '#0000ff', 
+                '#ffff00', '#00ffff', '#ff00ff', '#EC6D26'].map(color => (
+                <div 
+                  key={color}
+                  onClick={() => {
+                    setColorValue(color);
+                    editor.chain().focus().setMark('textStyle', { color }).run();
+                    setColorOpen(false);
+                  }}
+                  style={{
+                    width: '20px',
+                    height: '20px',
+                    backgroundColor: color,
+                    border: '1px solid var(--vscode-button-border, #ccc)',
+                    cursor: 'pointer'
+                  }}
+                />
+              ))}
+            </div>
+            <button 
+              onClick={applyColor}
+              style={{
+                marginTop: '8px',
+                padding: '4px 8px',
+                backgroundColor: '#EC6D26',
+                color: 'white',
+                border: 'none',
+                borderRadius: '2px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                width: '100%'
+              }}
+            >
+              Apply
+            </button>
+          </div>
         )}
       </div>
 
